@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Opus Audio Player</title>
+    <script src="https://cdn.jsdelivr.net/npm/@opus-codec/opus-decoder"></script>
+    <style>
+        body { margin: 20px; font-family: Arial, sans-serif; }
+        #messages { 
+            margin: 20px 0; 
+            padding: 20px;
+            border: 1px solid #ccc;
+            height: 400px;
+            overflow-y: auto;
+        }
+        button { 
+            padding: 10px 20px;
+            margin: 5px;
+        }
+        input, textarea {
+            padding: 10px;
+            width: 300px;
+            margin: 5px;
+        }
+        .audio-status {
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #e8f5e9;
+            border-radius: 5px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h2>WebSocket Opus Audio Player</h2>
+    <div>
+        <input type="text" id="topic" placeholder="Enter topic" value="test_topic"><br>
+        <textarea id="message" placeholder="Enter message">Hello, Agent!</textarea><br>
+        <button onclick="connect()">Connect</button>
+        <button onclick="sendMessage()">Send Message</button>
+        <button onclick="disconnect()">Disconnect</button>
+    </div>
+    <div id="audioStatus" class="audio-status">
+        Audio Status: <span id="audioStatusText">Idle</span>
+    </div>
+    <div id="messages"></div>
+
+    <script>
+        let socket = null;
+        let audioContext = null;
+        let decoder = null;
+        let audioQueue = [];
+        let isPlayingAudio = false;
+
+        // Initialize Web Audio API
+        async function initAudio() {
+            try {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                log('Audio system initialized', 'system');
+            } catch (error) {
+                console.error('Failed to initialize audio:', error);
+                log('Failed to initialize audio: ' + error, 'system');
+            }
+        }
+
+        // Initialize Opus Decoder
+        function initDecoder() {
+            try {
+                decoder = new OpusDecoder(48000, 1); // 48 kHz sample rate, mono audio
+                console.log('OpusDecoder initialized');
+            } catch (error) {
+                console.error('Failed to initialize OpusDecoder:', error);
+                log('Failed to initialize OpusDecoder: ' + error, 'system');
+            }
+        }
+
+        // Update audio status display
+        function updateAudioStatus(status) {
+            const audioStatus = document.getElementById('audioStatus');
+            const audioStatusText = document.getElementById('audioStatusText');
+            audioStatus.style.display = 'block';
+            audioStatusText.textContent = status;
+        }
+
+        // Log messages to the UI
+        function log(message, type = 'system') {
+            const messages = document.getElementById('messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.textContent = `${type.toUpperCase()}: ${message}`;
+            messages.appendChild(messageDiv);
+            messages.scrollTop = messages.scrollHeight;
+        }
+
+        // Handle incoming audio data
+        async function handleAudioData(data) {
+            if (!audioContext) await initAudio();
+            if (!decoder) initDecoder();
+
+            try {
+                updateAudioStatus('Decoding audio...');
+                const arrayBuffer = await data.arrayBuffer();
+                const audioData = new Uint8Array(arrayBuffer);
+
+                // Decode the Opus data to PCM
+                const pcmData = decoder.decode(audioData);
+
+                // Create an AudioBuffer and play it
+                const audioBuffer = audioContext.createBuffer(1, pcmData.length, 48000);
+                audioBuffer.getChannelData(0).set(pcmData);
+                const source = audioContext.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(audioContext.destination);
+
+                // Play the audio
+                updateAudioStatus('Playing audio...');
+                source.start(0);
+
+                source.onended = () => {
+                    updateAudioStatus('Audio finished');
+                    setTimeout(() => {
+                        updateAudioStatus('Idle');
+                    }, 2000);
+                    isPlayingAudio = false;
+                    playNextAudio(); // Play next audio in queue
+                };
+            } catch (error) {
+                console.error('Error processing audio:', error);
+                log('Error processing audio: ' + error, 'system');
+                updateAudioStatus('Error playing audio');
+            }
+        }
+
+        // Queue and play audio
+        function queueAudio(data) {
+            audioQueue.push(data);
+            if (!isPlayingAudio) playNextAudio();
+        }
+
+        async function playNextAudio() {
+            if (audioQueue.length === 0) return;
+            isPlayingAudio = true;
+            const nextAudio = audioQueue.shift();
+            await handleAudioData(nextAudio);
+        }
+
+        // Connect to WebSocket server
+        async function connect() {
+            if (socket) {
+                log('Already connected');
+                return;
+            }
+
+            try {
+                await initAudio();
+                initDecoder();
+
+                socket = new WebSocket('ws://localhost:8080/ws/conversation');
+
+                socket.onopen = () => {
+                    log('Connected to WebSocket');
+                    updateAudioStatus('Connected');
+                };
+
+                socket.onmessage = async (event) => {
+                    if (event.data instanceof Blob) {
+                        log('Received audio data', 'system');
+                        queueAudio(event.data);
+                    } else {
+                        log('Received: ' + event.data, 'system');
+                    }
+                };
+
+                socket.onerror = (error) => {
+                    log('WebSocket Error: ' + error, 'system');
+                    console.error('WebSocket Error:', error);
+                };
+
+                socket.onclose = () => {
+                    log('Connection closed', 'system');
+                    socket = null;
+                    updateAudioStatus('Disconnected');
+                };
+            } catch (error) {
+                log('Failed to connect: ' + error, 'system');
+                updateAudioStatus('Connection failed');
+            }
+        }
+
+        // Send a message to the server
+        function sendMessage() {
+            if (!socket) {
+                log('Not connected. Please connect first.', 'system');
+                return;
+            }
+
+            const topic = document.getElementById('topic').value;
+            const message = document.getElementById('message').value;
+
+            const data = {
+                topic: topic,
+                message: message
+            };
+
+            try {
+                socket.send(JSON.stringify(data));
+                log('Sent: ' + message, 'user');
+                updateAudioStatus('Waiting for response...');
+            } catch (error) {
+                log('Error sending message: ' + error, 'system');
+                updateAudioStatus('Error sending message');
+            }
+        }
+
+        // Disconnect from WebSocket server
+        function disconnect() {
+            if (socket) {
+                socket.close();
+                socket = null;
+                log('Disconnected', 'system');
+                updateAudioStatus('Disconnected');
+            }
+        }
+
+        updateAudioStatus('Idle');
+    </script>
+</body>
+</html>
