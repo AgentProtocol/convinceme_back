@@ -2,28 +2,31 @@ package server
 
 import (
 	"context"
-	"io"
 	"log"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/neo/convinceme_backend/internal/agent"
 )
 
+type Server struct {
+	router       *gin.Engine
+	agents       map[string]*agent.Agent
+	wsWriteMutex sync.Mutex
+}
+
+type ConversationMessage struct {
+	Topic   string `json:"topic"`
+	Message string `json:"message"`
+}
+
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
 		return true // Allow all origins for development
 	},
 	EnableCompression: true,
-}
-
-type Server struct {
-	router       *gin.Engine
-	agents       map[string]*agent.Agent
-	wsWriteMutex sync.Mutex
 }
 
 // NewServer creates a new HTTP server with WebSocket support
@@ -36,8 +39,9 @@ func NewServer(agents map[string]*agent.Agent) *Server {
 		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
 		c.Writer.Header().Set("Cross-Origin-Embedder-Policy", "require-corp")
 		c.Writer.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With, Range")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, HEAD")
+		c.Writer.Header().Set("Access-Control-Expose-Headers", "Content-Length, Content-Range, Content-Type")
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)
@@ -52,63 +56,31 @@ func NewServer(agents map[string]*agent.Agent) *Server {
 		agents: agents,
 	}
 
-	// Setup routes with detailed logging
-	router.GET("/ws/conversation", func(c *gin.Context) {
-		log.Printf("Received WebSocket connection request from: %s", c.Request.RemoteAddr)
-		server.handleConversationWebSocket(c)
-	})
+	// Setup routes
+	router.GET("/ws/conversation", server.handleConversationWebSocket)
 	router.POST("/api/conversation/start", server.startConversation)
 	router.GET("/api/agents", server.listAgents)
+
+	// Serve static files with custom headers for HLS
+	router.Static("/hls", "./static/hls")
+	router.Use(func(c *gin.Context) {
+		if c.Request.URL.Path[:4] == "/hls" {
+			if len(c.Request.URL.Path) > 5 && c.Request.URL.Path[len(c.Request.URL.Path)-5:] == ".opus" {
+				c.Header("Content-Type", "audio/opus")
+			}
+		}
+	})
 
 	return server
 }
 
-// Run starts the HTTP server
-func (s *Server) Run(addr string) error {
-	return s.router.Run(addr)
-}
-
-type ConversationMessage struct {
-	Topic   string `json:"topic"`
-	Message string `json:"message"`
-}
-
 func (s *Server) handleConversationWebSocket(c *gin.Context) {
-	log.Printf("Starting WebSocket upgrade process...")
-
-	// Log headers for debugging
-	log.Printf("Request Headers: %v", c.Request.Header)
-
-	upgrader.Subprotocols = []string{"binary"} // Add support for binary subprotocol
 	ws, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		log.Printf("Failed to upgrade connection: %v", err)
-		log.Printf("Response headers: %v", c.Writer.Header())
 		return
 	}
-	log.Printf("WebSocket connection successfully established")
 	defer ws.Close()
-
-	// Set read deadline to help detect connection issues
-	ws.SetReadDeadline(time.Now().Add(60 * time.Second))
-	ws.SetPongHandler(func(string) error {
-		ws.SetReadDeadline(time.Now().Add(60 * time.Second))
-		return nil
-	})
-
-	// Start a ping ticker
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-	go func() {
-		for range ticker.C {
-			s.wsWriteMutex.Lock()
-			if err := ws.WriteMessage(websocket.PingMessage, nil); err != nil {
-				s.wsWriteMutex.Unlock()
-				return
-			}
-			s.wsWriteMutex.Unlock()
-		}
-	}()
 
 	// Handle incoming messages
 	for {
@@ -139,7 +111,7 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 						return
 					}
 
-					// Send text response with mutex protection
+					// Send text response
 					textMsg := map[string]interface{}{
 						"type":     "text",
 						"agent":    a.GetName(),
@@ -154,46 +126,24 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 						return
 					}
 
-					// Create a pipe for streaming audio
-					pr, pw := io.Pipe()
-					go func() {
-						defer pw.Close()
-						if err := a.GenerateAndStreamAudio(ctx, response, pw); err != nil {
-							log.Printf("Failed to generate audio: %v", err)
-						}
-					}()
-
-					// Stream the audio data in chunks
-					buf := make([]byte, 32*1024) // 32KB chunks
-					for {
-						n, err := pr.Read(buf)
-						if err == io.EOF {
-							break
-						}
-						if err != nil {
-							log.Printf("Failed to read audio chunk: %v", err)
-							break
-						}
-
-						// Send audio chunk as binary message
-						s.wsWriteMutex.Lock()
-						err = ws.WriteMessage(websocket.BinaryMessage, buf[:n])
-						s.wsWriteMutex.Unlock()
-						if err != nil {
-							log.Printf("Failed to write audio chunk: %v", err)
-							break
-						}
+					// Generate and stream audio
+					audioPath, err := a.GenerateAndStreamAudio(ctx, response)
+					if err != nil {
+						log.Printf("Failed to generate audio: %v", err)
+						return
 					}
 
-					// Send end-of-stream marker
+					// Send audio URL
+					audioMsg := map[string]interface{}{
+						"type":      "audio",
+						"agent":     a.GetName(),
+						"audioPath": audioPath,
+					}
 					s.wsWriteMutex.Lock()
-					err = ws.WriteJSON(map[string]interface{}{
-						"type":  "audio_end",
-						"agent": a.GetName(),
-					})
+					err = ws.WriteJSON(audioMsg)
 					s.wsWriteMutex.Unlock()
 					if err != nil {
-						log.Printf("Failed to write end marker: %v", err)
+						log.Printf("Failed to write audio message: %v", err)
 					}
 				}()
 			}
@@ -227,4 +177,8 @@ func (s *Server) listAgents(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"agents": agents,
 	})
+}
+
+func (s *Server) Run(addr string) error {
+	return s.router.Run(addr)
 }

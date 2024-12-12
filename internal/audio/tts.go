@@ -1,10 +1,10 @@
 package audio
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 
 	"github.com/sashabaranov/go-openai"
@@ -13,11 +13,12 @@ import (
 type TTSService struct {
 	client *openai.Client
 	voice  openai.SpeechVoice
+	hls    *HLSManager
 }
 
 // NewTTSService creates a new TTS service with the specified voice
-func NewTTSService(apiKey string, voiceStr string) *TTSService {
-	voice := openai.VoiceAlloy // default voice
+func NewTTSService(apiKey string, voiceStr string, hlsDir string) (*TTSService, error) {
+	var voice openai.SpeechVoice
 	switch voiceStr {
 	case "alloy":
 		voice = openai.VoiceAlloy
@@ -31,50 +32,24 @@ func NewTTSService(apiKey string, voiceStr string) *TTSService {
 		voice = openai.VoiceNova
 	case "shimmer":
 		voice = openai.VoiceShimmer
+	default:
+		voice = openai.VoiceAlloy
+	}
+
+	hlsManager, err := NewHLSManager(hlsDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create HLS manager: %v", err)
 	}
 
 	return &TTSService{
 		client: openai.NewClient(apiKey),
 		voice:  voice,
-	}
-}
-
-func (s *TTSService) TextToSpeech(ctx context.Context, text string, outputPath string) error {
-	req := openai.CreateSpeechRequest{
-		Model: openai.TTSModel1,
-		Input: text,
-		Voice: s.voice,
-	}
-
-	resp, err := s.client.CreateSpeech(ctx, req)
-	if err != nil {
-		return fmt.Errorf("failed to create speech: %v", err)
-	}
-	defer resp.Close()
-
-	// Ensure directory exists
-	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
-		return fmt.Errorf("failed to create directory: %v", err)
-	}
-
-	// Create the output file
-	out, err := os.Create(outputPath)
-	if err != nil {
-		return fmt.Errorf("failed to create output file: %v", err)
-	}
-	defer out.Close()
-
-	// Copy the response body to the output file
-	_, err = io.Copy(out, resp)
-	if err != nil {
-		return fmt.Errorf("failed to write audio file: %v", err)
-	}
-
-	return nil
+		hls:    hlsManager,
+	}, nil
 }
 
 // GenerateAndStream generates audio from text and streams it to the writer
-func (t *TTSService) GenerateAndStream(ctx context.Context, text string, writer io.Writer) error {
+func (t *TTSService) GenerateAndStream(ctx context.Context, text string, agentName string) (string, error) {
 	req := openai.CreateSpeechRequest{
 		Model:          openai.TTSModel1,
 		Input:          text,
@@ -84,24 +59,37 @@ func (t *TTSService) GenerateAndStream(ctx context.Context, text string, writer 
 
 	resp, err := t.client.CreateSpeech(ctx, req)
 	if err != nil {
-		return fmt.Errorf("failed to create speech: %v", err)
+		return "", fmt.Errorf("failed to create speech: %v", err)
+	}
+	defer resp.Close()
+
+	// Read the entire response into a buffer
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, resp); err != nil {
+		return "", fmt.Errorf("failed to read response: %v", err)
 	}
 
-	// Stream the Opus data directly from OpenAI
-	_, err = io.Copy(writer, resp)
-	return err
+	// Add the opus data as a new HLS segment
+	segmentName, err := t.hls.AddSegment(buf.Bytes(), agentName)
+	if err != nil {
+		return "", fmt.Errorf("failed to add HLS segment: %v", err)
+	}
+
+	// Return the full URL path
+	return fmt.Sprintf("http://localhost:8080/hls/%s", segmentName), nil
 }
 
-func (s *TTSService) GenerateToFile(ctx context.Context, text, outputDir string) (string, error) {
+// GetPlaylistURL returns the URL of the HLS playlist
+func (t *TTSService) GetPlaylistURL() string {
+	return "http://localhost:8080/hls/playlist.m3u8"
+}
+
+// GenerateToFile generates audio and saves it to a file
+func (t *TTSService) GenerateToFile(ctx context.Context, text, outputDir string) (string, error) {
 	outputFile := filepath.Join(outputDir, "output.opus")
-
-	f, err := os.Create(outputFile)
-	if err != nil {
-		return "", fmt.Errorf("failed to create output file: %v", err)
-	}
-	defer f.Close()
-
-	if err := s.GenerateAndStream(ctx, text, f); err != nil {
+	
+	// Generate the audio and get the HLS path
+	if _, err := t.GenerateAndStream(ctx, text, "default"); err != nil {
 		return "", err
 	}
 

@@ -3,226 +3,345 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebSocket Opus Audio Player</title>
-    <script src="https://cdn.jsdelivr.net/npm/@opus-codec/opus-decoder"></script>
+    <title>AI Agent Chat Interface</title>
     <style>
-        body { margin: 20px; font-family: Arial, sans-serif; }
-        #messages { 
-            margin: 20px 0; 
+        :root {
+            --primary-color: #2196F3;
+            --secondary-color: #1976D2;
+            --background-color: #f5f5f5;
+            --text-color: #333;
+            --border-color: #ddd;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
             padding: 20px;
-            border: 1px solid #ccc;
-            height: 400px;
+            background-color: var(--background-color);
+            color: var(--text-color);
+        }
+
+        .container {
+            display: flex;
+            gap: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .chat-section {
+            flex: 2;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            height: 80vh;
+        }
+
+        .log-section {
+            flex: 1;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            height: 80vh;
+        }
+
+        .section-header {
+            padding: 15px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .status {
+            display: flex;
+            gap: 10px;
+            font-size: 0.9em;
+        }
+
+        .status span {
+            padding: 4px 8px;
+            border-radius: 4px;
+            background-color: #eee;
+        }
+
+        .chat-messages, .log-messages {
+            flex: 1;
             overflow-y: auto;
+            padding: 15px;
         }
-        button { 
+
+        .message {
+            margin-bottom: 15px;
+            padding: 10px;
+            border-radius: 8px;
+            max-width: 80%;
+        }
+
+        .message.user {
+            background-color: var(--primary-color);
+            color: white;
+            margin-left: auto;
+        }
+
+        .message.agent {
+            background-color: #f0f0f0;
+            margin-right: auto;
+        }
+
+        .agent-name {
+            font-weight: bold;
+            display: block;
+            margin-bottom: 5px;
+            color: var(--secondary-color);
+        }
+
+        .input-section {
+            padding: 15px;
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            gap: 10px;
+        }
+
+        textarea {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            resize: none;
+            height: 60px;
+        }
+
+        button {
             padding: 10px 20px;
-            margin: 5px;
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s;
         }
-        input, textarea {
-            padding: 10px;
-            width: 300px;
-            margin: 5px;
+
+        button:hover {
+            background-color: var(--secondary-color);
         }
-        .audio-status {
-            margin: 10px 0;
-            padding: 10px;
+
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+
+        .log-entry {
+            padding: 5px 10px;
+            border-left: 3px solid #ccc;
+            margin-bottom: 5px;
+        }
+
+        .log-entry.error {
+            border-left-color: #f44336;
+            background-color: #ffebee;
+        }
+
+        .log-entry.audio {
+            border-left-color: #4caf50;
             background-color: #e8f5e9;
-            border-radius: 5px;
-            display: none;
+        }
+
+        #audioStatus {
+            padding: 4px 8px;
+            border-radius: 4px;
+            background-color: #e8f5e9;
+            color: #2e7d32;
         }
     </style>
 </head>
 <body>
-    <h2>WebSocket Opus Audio Player</h2>
-    <div>
-        <input type="text" id="topic" placeholder="Enter topic" value="test_topic"><br>
-        <textarea id="message" placeholder="Enter message">Hello, Agent!</textarea><br>
-        <button onclick="connect()">Connect</button>
-        <button onclick="sendMessage()">Send Message</button>
-        <button onclick="disconnect()">Disconnect</button>
+    <div class="container">
+        <div class="chat-section">
+            <div class="section-header">
+                <h2>Chat</h2>
+                <div class="status">
+                    <span id="connectionStatus">Disconnected</span>
+                    <span id="audioStatus">Idle</span>
+                </div>
+            </div>
+            <div id="chatMessages" class="chat-messages"></div>
+            <div class="input-section">
+                <textarea id="message" placeholder="Type your message..."></textarea>
+                <button id="sendBtn" onclick="sendMessage()" disabled>Send</button>
+                <button id="connectBtn" onclick="connect()">Connect</button>
+                <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+            </div>
+        </div>
+        <div class="log-section">
+            <div class="section-header">
+                <h2>System Log</h2>
+            </div>
+            <div id="logMessages" class="log-messages"></div>
+        </div>
     </div>
-    <div id="audioStatus" class="audio-status">
-        Audio Status: <span id="audioStatusText">Idle</span>
-    </div>
-    <div id="messages"></div>
+
+    <audio id="audioPlayer" style="display: none;"></audio>
 
     <script>
-        let socket = null;
-        let audioContext = null;
-        let decoder = null;
-        let audioQueue = [];
+        let ws = null;
         let isPlayingAudio = false;
+        let audioQueue = [];
+        const audioPlayer = document.getElementById('audioPlayer');
 
-        // Initialize Web Audio API
-        async function initAudio() {
-            try {
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                log('Audio system initialized', 'system');
-            } catch (error) {
-                console.error('Failed to initialize audio:', error);
-                log('Failed to initialize audio: ' + error, 'system');
-            }
-        }
-
-        // Initialize Opus Decoder
-        function initDecoder() {
-            try {
-                decoder = new OpusDecoder(48000, 1); // 48 kHz sample rate, mono audio
-                console.log('OpusDecoder initialized');
-            } catch (error) {
-                console.error('Failed to initialize OpusDecoder:', error);
-                log('Failed to initialize OpusDecoder: ' + error, 'system');
-            }
-        }
-
-        // Update audio status display
         function updateAudioStatus(status) {
-            const audioStatus = document.getElementById('audioStatus');
-            const audioStatusText = document.getElementById('audioStatusText');
-            audioStatus.style.display = 'block';
-            audioStatusText.textContent = status;
+            document.getElementById('audioStatus').textContent = status;
         }
 
-        // Log messages to the UI
         function log(message, type = 'system') {
-            const messages = document.getElementById('messages');
+            const logMessages = document.getElementById('logMessages');
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry ${type}`;
+            logEntry.textContent = message;
+            logMessages.appendChild(logEntry);
+            logMessages.scrollTop = logMessages.scrollHeight;
+        }
+
+        function addMessage(message, isUser = false, agentName = '') {
+            const chatMessages = document.getElementById('chatMessages');
             const messageDiv = document.createElement('div');
-            messageDiv.textContent = `${type.toUpperCase()}: ${message}`;
-            messages.appendChild(messageDiv);
-            messages.scrollTop = messages.scrollHeight;
-        }
-
-        // Handle incoming audio data
-        async function handleAudioData(data) {
-            if (!audioContext) await initAudio();
-            if (!decoder) initDecoder();
-
-            try {
-                updateAudioStatus('Decoding audio...');
-                const arrayBuffer = await data.arrayBuffer();
-                const audioData = new Uint8Array(arrayBuffer);
-
-                // Decode the Opus data to PCM
-                const pcmData = decoder.decode(audioData);
-
-                // Create an AudioBuffer and play it
-                const audioBuffer = audioContext.createBuffer(1, pcmData.length, 48000);
-                audioBuffer.getChannelData(0).set(pcmData);
-                const source = audioContext.createBufferSource();
-                source.buffer = audioBuffer;
-                source.connect(audioContext.destination);
-
-                // Play the audio
-                updateAudioStatus('Playing audio...');
-                source.start(0);
-
-                source.onended = () => {
-                    updateAudioStatus('Audio finished');
-                    setTimeout(() => {
-                        updateAudioStatus('Idle');
-                    }, 2000);
-                    isPlayingAudio = false;
-                    playNextAudio(); // Play next audio in queue
-                };
-            } catch (error) {
-                console.error('Error processing audio:', error);
-                log('Error processing audio: ' + error, 'system');
-                updateAudioStatus('Error playing audio');
+            messageDiv.className = `message ${isUser ? 'user' : 'agent'}`;
+            
+            if (!isUser && agentName) {
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'agent-name';
+                nameSpan.textContent = agentName;
+                messageDiv.appendChild(nameSpan);
             }
+            
+            const textSpan = document.createElement('span');
+            textSpan.className = 'message-text';
+            textSpan.textContent = message;
+            messageDiv.appendChild(textSpan);
+            
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
         }
 
-        // Queue and play audio
-        function queueAudio(data) {
-            audioQueue.push(data);
-            if (!isPlayingAudio) playNextAudio();
-        }
-
-        async function playNextAudio() {
-            if (audioQueue.length === 0) return;
-            isPlayingAudio = true;
-            const nextAudio = audioQueue.shift();
-            await handleAudioData(nextAudio);
-        }
-
-        // Connect to WebSocket server
-        async function connect() {
-            if (socket) {
-                log('Already connected');
-                return;
-            }
-
+        function connect() {
             try {
-                await initAudio();
-                initDecoder();
+                ws = new WebSocket('ws://localhost:8080/ws/conversation');
+                document.getElementById('connectionStatus').textContent = 'Connecting...';
 
-                socket = new WebSocket('ws://localhost:8080/ws/conversation');
-
-                socket.onopen = () => {
-                    log('Connected to WebSocket');
-                    updateAudioStatus('Connected');
+                ws.onopen = () => {
+                    log('Connected to server');
+                    document.getElementById('connectionStatus').textContent = 'Connected';
+                    updateButtonStates(true);
                 };
 
-                socket.onmessage = async (event) => {
-                    if (event.data instanceof Blob) {
-                        log('Received audio data', 'system');
-                        queueAudio(event.data);
-                    } else {
-                        log('Received: ' + event.data, 'system');
+                ws.onclose = () => {
+                    log('Disconnected from server');
+                    document.getElementById('connectionStatus').textContent = 'Disconnected';
+                    updateButtonStates(false);
+                    ws = null;
+                };
+
+                ws.onerror = (error) => {
+                    log(`WebSocket error: ${error}`, 'error');
+                };
+
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    if (data.type === 'text') {
+                        addMessage(data.message, false, data.agent);
+                    } else if (data.type === 'audio') {
+                        queueAudio(data.audioPath, data.agent);
                     }
                 };
-
-                socket.onerror = (error) => {
-                    log('WebSocket Error: ' + error, 'system');
-                    console.error('WebSocket Error:', error);
-                };
-
-                socket.onclose = () => {
-                    log('Connection closed', 'system');
-                    socket = null;
-                    updateAudioStatus('Disconnected');
-                };
             } catch (error) {
-                log('Failed to connect: ' + error, 'system');
+                log(`Failed to connect: ${error}`, 'error');
                 updateAudioStatus('Connection failed');
+                updateButtonStates(false);
             }
         }
 
-        // Send a message to the server
-        function sendMessage() {
-            if (!socket) {
-                log('Not connected. Please connect first.', 'system');
+        function queueAudio(audioPath, agent) {
+            audioQueue.push({ path: audioPath, agent: agent });
+            if (!isPlayingAudio) {
+                playNextAudio();
+            }
+        }
+
+        function playNextAudio() {
+            if (audioQueue.length === 0 || isPlayingAudio) {
                 return;
             }
 
-            const topic = document.getElementById('topic').value;
-            const message = document.getElementById('message').value;
+            const { path, agent } = audioQueue[0];
+            isPlayingAudio = true;
+            updateAudioStatus(`Playing audio from ${agent}`);
+
+            audioPlayer.src = path;
+            audioPlayer.play().catch(error => {
+                console.error('Audio playback error:', error);
+                log(`Audio playback error: ${error.message}`, 'error');
+                finishCurrentAudio();
+            });
+
+            audioPlayer.onended = finishCurrentAudio;
+            audioPlayer.onerror = (e) => {
+                console.error('Audio player error:', e);
+                log(`Error playing audio from ${agent}: ${e.target.error?.message || 'Unknown error'}`, 'error');
+                finishCurrentAudio();
+            };
+        }
+
+        function finishCurrentAudio() {
+            audioQueue.shift();
+            isPlayingAudio = false;
+            updateAudioStatus('Idle');
+            playNextAudio();
+        }
+
+        function sendMessage() {
+            if (!ws) {
+                log('Not connected. Please connect first.', 'error');
+                return;
+            }
+
+            const messageInput = document.getElementById('message');
+            const message = messageInput.value.trim();
+            if (!message) return;
 
             const data = {
-                topic: topic,
+                topic: "conversation",
                 message: message
             };
 
-            try {
-                socket.send(JSON.stringify(data));
-                log('Sent: ' + message, 'user');
-                updateAudioStatus('Waiting for response...');
-            } catch (error) {
-                log('Error sending message: ' + error, 'system');
-                updateAudioStatus('Error sending message');
-            }
+            ws.send(JSON.stringify(data));
+            addMessage(message, true);
+            messageInput.value = '';
         }
 
-        // Disconnect from WebSocket server
         function disconnect() {
-            if (socket) {
-                socket.close();
-                socket = null;
-                log('Disconnected', 'system');
-                updateAudioStatus('Disconnected');
+            if (ws) {
+                ws.close();
+                log('Disconnected from server');
+                document.getElementById('connectionStatus').textContent = 'Disconnected';
+                updateButtonStates(false);
             }
         }
 
-        updateAudioStatus('Idle');
+        function updateButtonStates(connected) {
+            document.getElementById('sendBtn').disabled = !connected;
+            document.getElementById('connectBtn').disabled = connected;
+            document.getElementById('disconnectBtn').disabled = !connected;
+        }
+
+        document.getElementById('message').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
     </script>
 </body>
 </html>

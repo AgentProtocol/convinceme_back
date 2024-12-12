@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"fmt"
-	"io"
 
 	"github.com/neo/convinceme_backend/internal/audio"
 	"github.com/neo/convinceme_backend/internal/types"
@@ -30,7 +29,7 @@ type Agent struct {
 }
 
 // NewAgent creates a new AI agent with the specified configuration
-func NewAgent(apiKey string, config AgentConfig) (*Agent, error) {
+func NewAgent(apiKey string, config AgentConfig, hlsDir string) (*Agent, error) {
 	if !config.Voice.IsValid() {
 		config.Voice = types.VoiceAlloy // fallback to alloy if invalid
 	}
@@ -47,7 +46,10 @@ func NewAgent(apiKey string, config AgentConfig) (*Agent, error) {
 		return nil, fmt.Errorf("failed to create LLM: %v", err)
 	}
 
-	tts := audio.NewTTSService(apiKey, config.Voice.String())
+	tts, err := audio.NewTTSService(apiKey, config.Voice.String(), hlsDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create TTS service: %v", err)
+	}
 
 	return &Agent{
 		config: config,
@@ -75,12 +77,6 @@ Temperature: %.1f, Creativity level: %s:`,
 	response := completion
 	a.memory = append(a.memory, response)
 
-	// Generate speech for the response
-	//audioPath := filepath.Join("output", fmt.Sprintf("%s_response_%d.mp3", a.config.Name, len(a.memory)))
-	//if err := a.tts.TextToSpeech(ctx, response, audioPath); err != nil {
-	//	return "", fmt.Errorf("failed to generate speech: %v", err)
-	//}
-
 	return response, nil
 }
 
@@ -104,7 +100,7 @@ func (a *Agent) GetMemory() []string {
 	return a.memory
 }
 
-// GenerateAndStreamAudio generates audio from text and streams it using the provided writer
-func (a *Agent) GenerateAndStreamAudio(ctx context.Context, text string, writer io.Writer) error {
-	return a.tts.GenerateAndStream(ctx, text, writer)
+// GenerateAndStreamAudio generates audio from text and returns the HLS segment path
+func (a *Agent) GenerateAndStreamAudio(ctx context.Context, text string) (string, error) {
+	return a.tts.GenerateAndStream(ctx, text, a.config.Name)
 }

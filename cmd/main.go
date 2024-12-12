@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/joho/godotenv"
 	"github.com/neo/convinceme_backend/internal/agent"
@@ -19,6 +20,12 @@ func main() {
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
 		log.Fatal("OPENAI_API_KEY is required")
+	}
+
+	// Ensure HLS directory exists
+	hlsDir := filepath.Join("static", "hls")
+	if err := os.MkdirAll(hlsDir, 0755); err != nil {
+		log.Fatalf("Failed to create HLS directory: %v", err)
 	}
 
 	// Create agent configurations
@@ -41,12 +48,12 @@ func main() {
 	}
 
 	// Create agents
-	agent1, err := agent.NewAgent(apiKey, agent1Config)
+	agent1, err := agent.NewAgent(apiKey, agent1Config, hlsDir)
 	if err != nil {
 		log.Fatalf("Failed to create agent1: %v", err)
 	}
 
-	agent2, err := agent.NewAgent(apiKey, agent2Config)
+	agent2, err := agent.NewAgent(apiKey, agent2Config, hlsDir)
 	if err != nil {
 		log.Fatalf("Failed to create agent2: %v", err)
 	}

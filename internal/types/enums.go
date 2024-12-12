@@ -11,7 +11,7 @@ const (
 	ResponseStyleHumorous  ResponseStyle = "humorous"  // Light-hearted and funny tone
 )
 
-// Voice represents available TTS voices from OpenAI
+// Voice represents available TTS voices
 type Voice string
 
 const (
@@ -44,6 +44,11 @@ func (s ResponseStyle) IsValid() bool {
 	return false
 }
 
+// String converts the enum to string
+func (s ResponseStyle) String() string {
+	return string(s)
+}
+
 // IsValid checks if the Voice is valid
 func (v Voice) IsValid() bool {
 	switch v {
@@ -51,11 +56,6 @@ func (v Voice) IsValid() bool {
 		return true
 	}
 	return false
-}
-
-// String converts the enum to string
-func (s ResponseStyle) String() string {
-	return string(s)
 }
 
 // String converts the enum to string
