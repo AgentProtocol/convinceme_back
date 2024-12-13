@@ -4,14 +4,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
 const (
-	maxSegments   = 5                    // Maximum number of segments to keep
-	segmentLength = 4                    // Length of each segment in seconds
-	playlistFile  = "playlist.m3u8"      // Master playlist filename
-	segmentFormat = "segment_%d_%s.opus" // Format for segment filenames
+	maxSegments   = 5                   // Maximum number of segments to keep
+	segmentLength = 4                   // Length of each segment in seconds
+	playlistFile  = "playlist.m3u8"     // Master playlist filename
+	segmentFormat = "segment_%d_%s.aac" // Format for segment filenames
 )
 
 type HLSManager struct {
@@ -49,7 +50,8 @@ func (h *HLSManager) AddSegment(data []byte, agentName string) (string, error) {
 	segmentNum := h.lastSegment[agentName]
 
 	// Create segment filename
-	segmentName := fmt.Sprintf(segmentFormat, segmentNum, agentName)
+	agentNameWithDashes := strings.Replace(agentName, " ", "_", -1)
+	segmentName := fmt.Sprintf(segmentFormat, segmentNum, agentNameWithDashes)
 	segmentPath := filepath.Join(h.baseDir, segmentName)
 
 	// Write segment file

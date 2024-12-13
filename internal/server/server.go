@@ -65,8 +65,8 @@ func NewServer(agents map[string]*agent.Agent) *Server {
 	router.Static("/hls", "./static/hls")
 	router.Use(func(c *gin.Context) {
 		if c.Request.URL.Path[:4] == "/hls" {
-			if len(c.Request.URL.Path) > 5 && c.Request.URL.Path[len(c.Request.URL.Path)-5:] == ".opus" {
-				c.Header("Content-Type", "audio/opus")
+			if len(c.Request.URL.Path) > 5 && c.Request.URL.Path[len(c.Request.URL.Path)-5:] == ".aac" {
+				c.Header("Content-Type", "audio/aac")
 			}
 		}
 	})

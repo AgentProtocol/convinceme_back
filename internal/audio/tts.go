@@ -54,7 +54,7 @@ func (t *TTSService) GenerateAndStream(ctx context.Context, text string, agentNa
 		Model:          openai.TTSModel1,
 		Input:          text,
 		Voice:          t.voice,
-		ResponseFormat: openai.SpeechResponseFormatOpus,
+		ResponseFormat: openai.SpeechResponseFormatAac,
 	}
 
 	resp, err := t.client.CreateSpeech(ctx, req)
@@ -69,7 +69,7 @@ func (t *TTSService) GenerateAndStream(ctx context.Context, text string, agentNa
 		return "", fmt.Errorf("failed to read response: %v", err)
 	}
 
-	// Add the opus data as a new HLS segment
+	// Add the aa data as a new HLS segment
 	segmentName, err := t.hls.AddSegment(buf.Bytes(), agentName)
 	if err != nil {
 		return "", fmt.Errorf("failed to add HLS segment: %v", err)
@@ -86,8 +86,8 @@ func (t *TTSService) GetPlaylistURL() string {
 
 // GenerateToFile generates audio and saves it to a file
 func (t *TTSService) GenerateToFile(ctx context.Context, text, outputDir string) (string, error) {
-	outputFile := filepath.Join(outputDir, "output.opus")
-	
+	outputFile := filepath.Join(outputDir, "output.aac")
+
 	// Generate the audio and get the HLS path
 	if _, err := t.GenerateAndStream(ctx, text, "default"); err != nil {
 		return "", err
