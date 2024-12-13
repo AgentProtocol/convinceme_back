@@ -216,7 +216,11 @@
                     hls.destroy();
                 }
 
-                hls = new Hls();
+                hls = new Hls({
+                    autoStartLoad: true,
+                    capLevelToPlayerSize: true,
+                    maxLoadingDelay: 0,
+                });
                 hls.loadSource(streamUrl);
                 hls.attachMedia(audioPlayer);
                 
