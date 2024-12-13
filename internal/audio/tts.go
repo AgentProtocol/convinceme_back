@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"sync"
 
 	"github.com/sashabaranov/go-openai"
 )
@@ -14,6 +15,20 @@ type TTSService struct {
 	client *openai.Client
 	voice  openai.SpeechVoice
 	hls    *HLSManager
+}
+
+var (
+	hlsManagerInstance *HLSManager
+	hlsManagerOnce     sync.Once
+)
+
+// getHLSManager returns the singleton HLSManager instance
+func getHLSManager(hlsDir string) (*HLSManager, error) {
+	var err error
+	hlsManagerOnce.Do(func() {
+		hlsManagerInstance, err = NewHLSManager(hlsDir)
+	})
+	return hlsManagerInstance, err
 }
 
 // NewTTSService creates a new TTS service with the specified voice
@@ -36,9 +51,9 @@ func NewTTSService(apiKey string, voiceStr string, hlsDir string) (*TTSService, 
 		voice = openai.VoiceAlloy
 	}
 
-	hlsManager, err := NewHLSManager(hlsDir)
+	hlsManager, err := getHLSManager(hlsDir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create HLS manager: %v", err)
+		return nil, fmt.Errorf("failed to get HLS manager: %v", err)
 	}
 
 	return &TTSService{
