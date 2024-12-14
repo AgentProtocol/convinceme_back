@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"sync"
 
 	"github.com/sashabaranov/go-openai"
 )
@@ -14,6 +15,20 @@ type TTSService struct {
 	client *openai.Client
 	voice  openai.SpeechVoice
 	hls    *HLSManager
+}
+
+var (
+	hlsManagerInstance *HLSManager
+	hlsManagerOnce     sync.Once
+)
+
+// getHLSManager returns the singleton HLSManager instance
+func getHLSManager(hlsDir string) (*HLSManager, error) {
+	var err error
+	hlsManagerOnce.Do(func() {
+		hlsManagerInstance, err = NewHLSManager(hlsDir)
+	})
+	return hlsManagerInstance, err
 }
 
 // NewTTSService creates a new TTS service with the specified voice
@@ -36,9 +51,9 @@ func NewTTSService(apiKey string, voiceStr string, hlsDir string) (*TTSService, 
 		voice = openai.VoiceAlloy
 	}
 
-	hlsManager, err := NewHLSManager(hlsDir)
+	hlsManager, err := getHLSManager(hlsDir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create HLS manager: %v", err)
+		return nil, fmt.Errorf("failed to get HLS manager: %v", err)
 	}
 
 	return &TTSService{
@@ -54,7 +69,7 @@ func (t *TTSService) GenerateAndStream(ctx context.Context, text string, agentNa
 		Model:          openai.TTSModel1,
 		Input:          text,
 		Voice:          t.voice,
-		ResponseFormat: openai.SpeechResponseFormatOpus,
+		ResponseFormat: openai.SpeechResponseFormatAac,
 	}
 
 	resp, err := t.client.CreateSpeech(ctx, req)
@@ -69,7 +84,7 @@ func (t *TTSService) GenerateAndStream(ctx context.Context, text string, agentNa
 		return "", fmt.Errorf("failed to read response: %v", err)
 	}
 
-	// Add the opus data as a new HLS segment
+	// Add the aa data as a new HLS segment
 	segmentName, err := t.hls.AddSegment(buf.Bytes(), agentName)
 	if err != nil {
 		return "", fmt.Errorf("failed to add HLS segment: %v", err)
@@ -86,8 +101,8 @@ func (t *TTSService) GetPlaylistURL() string {
 
 // GenerateToFile generates audio and saves it to a file
 func (t *TTSService) GenerateToFile(ctx context.Context, text, outputDir string) (string, error) {
-	outputFile := filepath.Join(outputDir, "output.opus")
-	
+	outputFile := filepath.Join(outputDir, "output.aac")
+
 	// Generate the audio and get the HLS path
 	if _, err := t.GenerateAndStream(ctx, text, "default"); err != nil {
 		return "", err

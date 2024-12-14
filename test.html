@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Agent Chat Interface</title>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <style>
         :root {
             --primary-color: #2196F3;
@@ -188,12 +189,57 @@
 
     <script>
         let ws = null;
-        let isPlayingAudio = false;
-        let audioQueue = [];
+        let hls = null;
         const audioPlayer = document.getElementById('audioPlayer');
 
         function updateAudioStatus(status) {
             document.getElementById('audioStatus').textContent = status;
+        }
+
+        function initializeHLS(streamUrl) {
+            if (!audioPlayer) return;
+
+            updateAudioStatus('Loading stream...');
+
+            // Native HLS support in Safari
+            if (audioPlayer.canPlayType('application/vnd.apple.mpegurl')) {
+                audioPlayer.src = streamUrl;
+                audioPlayer.play().catch(error => {
+                    console.error('Native HLS playback error:', error);
+                    updateAudioStatus('Playback error');
+                    log('Native HLS playback error: ' + error.message, 'error');
+                });
+            }
+            // Use HLS.js for other browsers
+            else if (Hls.isSupported()) {
+                if (hls) {
+                    hls.destroy();
+                }
+
+                hls = new Hls({
+                    autoStartLoad: true,
+                    capLevelToPlayerSize: true,
+                    maxLoadingDelay: 0,
+                });
+                hls.loadSource(streamUrl);
+                hls.attachMedia(audioPlayer);
+                
+                hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                    audioPlayer.play().catch(error => {
+                        console.error('HLS.js playback error:', error);
+                        updateAudioStatus('Playback error');
+                        log('HLS.js playback error: ' + error.message, 'error');
+                    });
+                });
+
+                hls.on(Hls.Events.ERROR, (event, data) => {
+                    console.error('HLS.js error:', data);
+                    if (data.fatal) {
+                        updateAudioStatus('Stream error');
+                        log('HLS.js fatal error: ' + data.details, 'error');
+                    }
+                });
+            }
         }
 
         function log(message, type = 'system') {
@@ -252,53 +298,15 @@
                     const data = JSON.parse(event.data);
                     if (data.type === 'text') {
                         addMessage(data.message, false, data.agent);
-                    } else if (data.type === 'audio') {
-                        queueAudio(data.audioPath, data.agent);
                     }
                 };
+
+                initializeHLS('http://localhost:8080/hls/playlist.m3u8');
             } catch (error) {
                 log(`Failed to connect: ${error}`, 'error');
                 updateAudioStatus('Connection failed');
                 updateButtonStates(false);
             }
-        }
-
-        function queueAudio(audioPath, agent) {
-            audioQueue.push({ path: audioPath, agent: agent });
-            if (!isPlayingAudio) {
-                playNextAudio();
-            }
-        }
-
-        function playNextAudio() {
-            if (audioQueue.length === 0 || isPlayingAudio) {
-                return;
-            }
-
-            const { path, agent } = audioQueue[0];
-            isPlayingAudio = true;
-            updateAudioStatus(`Playing audio from ${agent}`);
-
-            audioPlayer.src = path;
-            audioPlayer.play().catch(error => {
-                console.error('Audio playback error:', error);
-                log(`Audio playback error: ${error.message}`, 'error');
-                finishCurrentAudio();
-            });
-
-            audioPlayer.onended = finishCurrentAudio;
-            audioPlayer.onerror = (e) => {
-                console.error('Audio player error:', e);
-                log(`Error playing audio from ${agent}: ${e.target.error?.message || 'Unknown error'}`, 'error');
-                finishCurrentAudio();
-            };
-        }
-
-        function finishCurrentAudio() {
-            audioQueue.shift();
-            isPlayingAudio = false;
-            updateAudioStatus('Idle');
-            playNextAudio();
         }
 
         function sendMessage() {
@@ -323,11 +331,23 @@
 
         function disconnect() {
             if (ws) {
+                cleanupAudio();
                 ws.close();
                 log('Disconnected from server');
                 document.getElementById('connectionStatus').textContent = 'Disconnected';
                 updateButtonStates(false);
             }
+        }
+
+        function cleanupAudio() {
+            if (hls) {
+                hls.destroy();
+                hls = null;
+            }
+            if (audioPlayer) {
+                audioPlayer.pause();
+            }
+            updateAudioStatus('Idle');
         }
 
         function updateButtonStates(connected) {

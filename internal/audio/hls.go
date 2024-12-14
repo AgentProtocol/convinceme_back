@@ -4,21 +4,23 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
 const (
-	maxSegments   = 5                    // Maximum number of segments to keep
-	segmentLength = 4                    // Length of each segment in seconds
-	playlistFile  = "playlist.m3u8"      // Master playlist filename
-	segmentFormat = "segment_%d_%s.opus" // Format for segment filenames
+	maxSegments   = 4                   // Maximum number of segments to keep
+	segmentLength = 4                   // Length of each segment in seconds
+	playlistFile  = "playlist.m3u8"     // Master playlist filename
+	segmentFormat = "segment_%d_%s.aac" // Format for segment filenames
 )
 
 type HLSManager struct {
 	baseDir     string
 	mu          sync.RWMutex
-	segments    map[string][]string // Map of agent -> segment files
-	lastSegment map[string]int      // Map of agent -> last segment number
+	segments    []string // Single list of segments in chronological order
+	lastSegment int      // Global segment counter
+	mediaSeq    int      // Global media sequence number
 }
 
 func NewHLSManager(baseDir string) (*HLSManager, error) {
@@ -28,8 +30,9 @@ func NewHLSManager(baseDir string) (*HLSManager, error) {
 
 	return &HLSManager{
 		baseDir:     baseDir,
-		segments:    make(map[string][]string),
-		lastSegment: make(map[string]int),
+		segments:    make([]string, 0),
+		lastSegment: 0,
+		mediaSeq:    0,
 	}, nil
 }
 
@@ -38,18 +41,12 @@ func (h *HLSManager) AddSegment(data []byte, agentName string) (string, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	// Initialize agent's segments if not exists
-	if _, exists := h.segments[agentName]; !exists {
-		h.segments[agentName] = make([]string, 0)
-		h.lastSegment[agentName] = 0
-	}
-
 	// Generate new segment number
-	h.lastSegment[agentName]++
-	segmentNum := h.lastSegment[agentName]
+	h.lastSegment++
 
 	// Create segment filename
-	segmentName := fmt.Sprintf(segmentFormat, segmentNum, agentName)
+	agentNameWithDashes := strings.Replace(strings.TrimSpace(agentName), " ", "_", -1)
+	segmentName := fmt.Sprintf(segmentFormat, h.lastSegment, agentNameWithDashes)
 	segmentPath := filepath.Join(h.baseDir, segmentName)
 
 	// Write segment file
@@ -58,19 +55,25 @@ func (h *HLSManager) AddSegment(data []byte, agentName string) (string, error) {
 	}
 
 	// Add to segments list
-	h.segments[agentName] = append(h.segments[agentName], segmentName)
+	h.segments = append(h.segments, segmentName)
 
 	// Keep only last N segments
-	if len(h.segments[agentName]) > maxSegments {
-		oldestSegment := h.segments[agentName][0]
-		h.segments[agentName] = h.segments[agentName][1:]
+	if len(h.segments) > maxSegments {
+		// Remove old segments
+		numToRemove := len(h.segments) - maxSegments
+		oldSegments := h.segments[:numToRemove]
+		h.segments = h.segments[numToRemove:]
 
-		// Remove old segment file
-		oldPath := filepath.Join(h.baseDir, oldestSegment)
-		os.Remove(oldPath)
+		// Increment media sequence by number of removed segments
+		h.mediaSeq += numToRemove
+
+		// Delete old segment files
+		for _, oldSegment := range oldSegments {
+			os.Remove(filepath.Join(h.baseDir, oldSegment))
+		}
 	}
 
-	// Update playlist with full URLs
+	// Update playlist
 	if err := h.updatePlaylist(); err != nil {
 		return "", fmt.Errorf("failed to update playlist: %v", err)
 	}
@@ -85,42 +88,28 @@ func (h *HLSManager) updatePlaylist() error {
 	// Create playlist content
 	content := "#EXTM3U\n"
 	content += "#EXT-X-VERSION:3\n"
+	content += "#EXT-X-ALLOW-CACHE:NO\n"
 	content += fmt.Sprintf("#EXT-X-TARGETDURATION:%d\n", segmentLength)
-	content += "#EXT-X-MEDIA-SEQUENCE:0\n"
+	content += fmt.Sprintf("#EXT-X-MEDIA-SEQUENCE:%d\n", h.mediaSeq)
 
-	// Add segments for each agent with full URLs
-	for agent, segments := range h.segments {
-		content += fmt.Sprintf("\n# Agent: %s\n", agent)
-		for _, segment := range segments {
-			content += fmt.Sprintf("#EXTINF:%.3f,\n", float64(segmentLength))
-			content += fmt.Sprintf("http://localhost:8080/hls/%s\n", segment)
-		}
+	// Add all segments in chronological order
+	fmt.Printf("Current segments in playlist: %v\n", h.segments)
+	for _, segment := range h.segments {
+		content += fmt.Sprintf("#EXTINF:%.3f,\n", float64(segmentLength))
+		content += fmt.Sprintf("http://localhost:8080/hls/%s\n", segment)
 	}
 
-	// Write playlist file
-	return os.WriteFile(playlistPath, []byte(content), 0644)
+	fmt.Printf("Writing playlist content:\n%s\n", content)
+
+	// Write playlist file atomically
+	tempFile := playlistPath + ".tmp"
+	if err := os.WriteFile(tempFile, []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to write temp playlist: %v", err)
+	}
+	return os.Rename(tempFile, playlistPath)
 }
 
 // GetPlaylistPath returns the path to the playlist file
 func (h *HLSManager) GetPlaylistPath() string {
 	return filepath.Join(h.baseDir, playlistFile)
-}
-
-// CleanupOldSegments removes segments older than maxAge
-func (h *HLSManager) CleanupOldSegments() {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	for agent := range h.segments {
-		if len(h.segments[agent]) > maxSegments {
-			// Remove old segments
-			oldSegments := h.segments[agent][:len(h.segments[agent])-maxSegments]
-			h.segments[agent] = h.segments[agent][len(h.segments[agent])-maxSegments:]
-
-			// Delete old segment files
-			for _, segment := range oldSegments {
-				os.Remove(filepath.Join(h.baseDir, segment))
-			}
-		}
-	}
 }
