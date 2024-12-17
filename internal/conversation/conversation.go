@@ -3,6 +3,7 @@ package conversation
 import (
 	"context"
 	"fmt"
+	"github.com/neo/convinceme_backend/internal/audio"
 	"time"
 
 	"github.com/neo/convinceme_backend/internal/agent"
@@ -69,14 +70,16 @@ func (c *Conversation) getPromptStyle() string {
 }
 
 // Start begins the conversation between the agents
-func (c *Conversation) Start(ctx context.Context) error {
+func (c *Conversation) Start(ctx context.Context, hlsManager *audio.HLSManager) error {
 	var lastMessage string
-	currentAgent := c.agent1
-	otherAgent := c.agent2
+	interviewer := c.agent1
+	guest := c.agent2
+	currentAgent := interviewer
+	otherAgent := guest
 
 	fmt.Printf("Starting conversation on topic: %s\n", c.config.Topic)
 	fmt.Printf("Style: %s\n", c.config.ResponseStyle)
-	fmt.Printf("Between %s and %s\n\n", c.agent1.GetName(), c.agent2.GetName())
+	fmt.Printf("Between %s (Interviewer) and %s (Guest)\n\n", interviewer.GetName(), guest.GetName())
 
 	stylePrompt := c.getPromptStyle()
 	lastMessage = fmt.Sprintf("Let's start discussing about %s. %s", c.config.Topic, stylePrompt)
@@ -87,8 +90,15 @@ func (c *Conversation) Start(ctx context.Context) error {
 			return fmt.Errorf("failed to generate response: %v", err)
 		}
 
-		fmt.Printf("AGENT-%d: %s\n", getAgentNumber(currentAgent, c.agent1), response)
+		fmt.Printf("AGENT-%d: %s\n", getAgentNumber(currentAgent, interviewer), response)
 		lastMessage = response
+
+		// Add the response as a new segment
+		segmentName, err := hlsManager.AddSegment([]byte(response), currentAgent.GetName())
+		if err != nil {
+			return fmt.Errorf("failed to add segment: %v", err)
+		}
+		fmt.Printf("Added segment: %s\n", segmentName)
 
 		// Switch agents for the next turn
 		currentAgent, otherAgent = otherAgent, currentAgent

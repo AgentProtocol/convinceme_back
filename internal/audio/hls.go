@@ -36,6 +36,11 @@ func NewHLSManager(baseDir string) (*HLSManager, error) {
 	}, nil
 }
 
+// sanitizeFilename ensures the filename is safe to use
+func sanitizeFilename(name string) string {
+	return strings.ReplaceAll(strings.TrimSpace(name), " ", "_")
+}
+
 // AddSegment adds a new segment to the HLS stream
 func (h *HLSManager) AddSegment(data []byte, agentName string) (string, error) {
 	h.mu.Lock()
@@ -45,8 +50,8 @@ func (h *HLSManager) AddSegment(data []byte, agentName string) (string, error) {
 	h.lastSegment++
 
 	// Create segment filename
-	agentNameWithDashes := strings.Replace(strings.TrimSpace(agentName), " ", "_", -1)
-	segmentName := fmt.Sprintf(segmentFormat, h.lastSegment, agentNameWithDashes)
+	agentNameSanitized := sanitizeFilename(agentName)
+	segmentName := fmt.Sprintf(segmentFormat, h.lastSegment, agentNameSanitized)
 	segmentPath := filepath.Join(h.baseDir, segmentName)
 
 	// Write segment file
@@ -69,7 +74,9 @@ func (h *HLSManager) AddSegment(data []byte, agentName string) (string, error) {
 
 		// Delete old segment files
 		for _, oldSegment := range oldSegments {
-			os.Remove(filepath.Join(h.baseDir, oldSegment))
+			if err := os.Remove(filepath.Join(h.baseDir, oldSegment)); err != nil {
+				return "", fmt.Errorf("failed to delete old segment file: %v", err)
+			}
 		}
 	}
 
@@ -93,13 +100,10 @@ func (h *HLSManager) updatePlaylist() error {
 	content += fmt.Sprintf("#EXT-X-MEDIA-SEQUENCE:%d\n", h.mediaSeq)
 
 	// Add all segments in chronological order
-	fmt.Printf("Current segments in playlist: %v\n", h.segments)
 	for _, segment := range h.segments {
 		content += fmt.Sprintf("#EXTINF:%.3f,\n", float64(segmentLength))
 		content += fmt.Sprintf("http://localhost:8080/hls/%s\n", segment)
 	}
-
-	fmt.Printf("Writing playlist content:\n%s\n", content)
 
 	// Write playlist file atomically
 	tempFile := playlistPath + ".tmp"
