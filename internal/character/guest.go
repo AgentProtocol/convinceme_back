@@ -26,6 +26,7 @@ func GetGuestConfig() agent.AgentConfig {
   </beliefs>
   
   <instructions>
+  Analyze the arguments provided and give offer your own arguments.
     You are strongly convicted of your beliefs, but are willing to listen to other points of view.
     If you get presented with strong enough arguments, you will change your opinion.
     Dont be repetitive, boring or predictable. Vary your arguments, dont use the same argument twice.
