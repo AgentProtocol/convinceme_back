@@ -6,13 +6,14 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 )
 
 const (
-	maxSegments   = 4                   // Maximum number of segments to keep
+	maxSegments   = 2                   // Maximum number of segments to keep
 	segmentLength = 4                   // Length of each segment in seconds
 	playlistFile  = "playlist.m3u8"     // Master playlist filename
-	segmentFormat = "segment_%d_%s.aac" // Format for segment filenames
+	segmentFormat = "segment_%s_%d.aac" // Format for segment filenames
 )
 
 type HLSManager struct {
@@ -46,12 +47,10 @@ func (h *HLSManager) AddSegment(data []byte, agentName string) (string, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	// Generate new segment number
-	h.lastSegment++
-
-	// Create segment filename
+	// Create segment filename with timestamp
+	timestamp := time.Now().Unix()
 	agentNameSanitized := sanitizeFilename(agentName)
-	segmentName := fmt.Sprintf(segmentFormat, h.lastSegment, agentNameSanitized)
+	segmentName := fmt.Sprintf(segmentFormat, agentNameSanitized, timestamp)
 	segmentPath := filepath.Join(h.baseDir, segmentName)
 
 	// Write segment file
@@ -62,7 +61,7 @@ func (h *HLSManager) AddSegment(data []byte, agentName string) (string, error) {
 	// Add to segments list
 	h.segments = append(h.segments, segmentName)
 
-	// Keep only last N segments
+	// Keep only the last N segments
 	if len(h.segments) > maxSegments {
 		// Remove old segments
 		numToRemove := len(h.segments) - maxSegments
@@ -99,7 +98,7 @@ func (h *HLSManager) updatePlaylist() error {
 	content += fmt.Sprintf("#EXT-X-TARGETDURATION:%d\n", segmentLength)
 	content += fmt.Sprintf("#EXT-X-MEDIA-SEQUENCE:%d\n", h.mediaSeq)
 
-	// Add all segments in chronological order
+	// Add the latest segments in chronological order
 	for _, segment := range h.segments {
 		content += fmt.Sprintf("#EXTINF:%.3f,\n", float64(segmentLength))
 		content += fmt.Sprintf("http://localhost:8080/hls/%s\n", segment)

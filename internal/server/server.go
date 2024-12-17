@@ -68,7 +68,18 @@ func NewServer(agents map[string]*agent.Agent) *Server {
 			if len(c.Request.URL.Path) > 5 && c.Request.URL.Path[len(c.Request.URL.Path)-5:] == ".aac" {
 				c.Header("Content-Type", "audio/aac")
 			}
+			if c.Request.URL.Path[len(c.Request.URL.Path)-5:] == ".m3u8" {
+				c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+				c.Header("Pragma", "no-cache")
+				c.Header("Expires", "0")
+			}
+		} else {
+			// Set no-cache headers for all other static files
+			c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+			c.Header("Pragma", "no-cache")
+			c.Header("Expires", "0")
 		}
+		c.Next()
 	})
 
 	return server
