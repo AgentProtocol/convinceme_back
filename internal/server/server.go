@@ -34,16 +34,14 @@ type ConversationMessage struct {
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins for development
+		return true
 	},
 	EnableCompression: true,
 }
 
-// NewServer creates a new HTTP server with WebSocket support
 func NewServer(agents map[string]*agent.Agent) *Server {
 	router := gin.Default()
 
-	// Add CORS middleware
 	router.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
@@ -67,20 +65,17 @@ func NewServer(agents map[string]*agent.Agent) *Server {
 		audioCache: make(map[string]audioCache),
 	}
 
-	// Setup routes
 	router.GET("/ws/conversation", server.handleConversationWebSocket)
 	router.GET("/api/audio/:id", server.handleAudioStream)
 	router.POST("/api/conversation/start", server.startConversation)
 	router.GET("/api/agents", server.listAgents)
 
-	// Serve static files
 	router.StaticFile("/", "./test.html")
 	router.Static("/static", "./static")
 
 	return server
 }
 
-// handleAudioStream streams audio data for a given ID
 func (s *Server) handleAudioStream(c *gin.Context) {
 	audioID := c.Param("id")
 
@@ -93,24 +88,20 @@ func (s *Server) handleAudioStream(c *gin.Context) {
 		return
 	}
 
-	// Set headers for audio streaming
-	c.Header("Content-Type", "audio/mp3")
+	c.Header("Content-Type", "audio/aac")
 	c.Header("Content-Length", fmt.Sprintf("%d", len(cache.data)))
 	c.Header("Cache-Control", "public, max-age=31536000")
 
-	// Stream the audio data
-	c.Data(http.StatusOK, "audio/mp3", cache.data)
+	c.Data(http.StatusOK, "audio/aac", cache.data)
 
-	// Clean up old cache entries in a separate goroutine
 	go s.cleanupCache()
 }
 
-// cleanupCache removes old cache entries
 func (s *Server) cleanupCache() {
 	s.cacheMutex.Lock()
 	defer s.cacheMutex.Unlock()
 
-	threshold := time.Now().Add(-1 * time.Hour) // Remove entries older than 1 hour
+	threshold := time.Now().Add(-1 * time.Hour)
 	for id, cache := range s.audioCache {
 		if cache.timestamp.Before(threshold) {
 			delete(s.audioCache, id)
@@ -126,7 +117,6 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 	}
 	defer ws.Close()
 
-	// Handle incoming messages
 	for {
 		var msg ConversationMessage
 		err := ws.ReadJSON(&msg)
@@ -137,25 +127,22 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 			break
 		}
 
-		// Process conversation in a goroutine
 		go func() {
 			ctx := context.Background()
 			var wg sync.WaitGroup
 
 			for _, agent := range s.agents {
-				a := agent // Create a local copy of the agent
+				a := agent
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
 
-					// Generate response
 					response, err := a.GenerateResponse(ctx, msg.Topic, msg.Message)
 					if err != nil {
 						log.Printf("Failed to generate response: %v", err)
 						return
 					}
 
-					// Send text response
 					textMsg := map[string]interface{}{
 						"type":     "text",
 						"agent":    a.GetName(),
@@ -170,14 +157,12 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 						return
 					}
 
-					// Generate audio
 					audioData, err := a.GenerateAndStreamAudio(ctx, response)
 					if err != nil {
 						log.Printf("Failed to generate audio: %v", err)
 						return
 					}
 
-					// Store audio in cache with a unique ID
 					audioID := fmt.Sprintf("%s_%d", a.GetName(), time.Now().UnixNano())
 					s.cacheMutex.Lock()
 					s.audioCache[audioID] = audioCache{
@@ -186,7 +171,6 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 					}
 					s.cacheMutex.Unlock()
 
-					// Send audio URL
 					audioMsg := map[string]interface{}{
 						"type":     "audio",
 						"agent":    a.GetName(),
@@ -233,16 +217,13 @@ func (s *Server) listAgents(c *gin.Context) {
 }
 
 func (s *Server) Run(addr string) error {
-	// Create HTTP/2 server
 	srv := &http.Server{
 		Addr:    addr,
 		Handler: s.router,
-		// Enable HTTP/2 support
 		TLSConfig: &tls.Config{
 			NextProtos: []string{"h2", "http/1.1"},
 		},
 	}
 
-	// Start HTTPS server with HTTP/2 support
 	return srv.ListenAndServeTLS("cert.pem", "key.pem")
 }

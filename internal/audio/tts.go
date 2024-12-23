@@ -10,13 +10,11 @@ import (
 	"github.com/sashabaranov/go-openai"
 )
 
-// TTSService handles text-to-speech conversion
 type TTSService struct {
 	client *openai.Client
 	voice  openai.SpeechVoice
 }
 
-// NewTTSService creates a new TTS service with the specified voice
 func NewTTSService(apiKey string, voiceStr string) (*TTSService, error) {
 	var voice openai.SpeechVoice
 	switch voiceStr {
@@ -42,13 +40,12 @@ func NewTTSService(apiKey string, voiceStr string) (*TTSService, error) {
 	}, nil
 }
 
-// GenerateAudio generates audio from text and returns the audio data
 func (t *TTSService) GenerateAudio(ctx context.Context, text string) ([]byte, error) {
 	req := openai.CreateSpeechRequest{
 		Model:          openai.TTSModel1,
 		Input:          text,
 		Voice:          t.voice,
-		ResponseFormat: openai.SpeechResponseFormatMp3,
+		ResponseFormat: openai.SpeechResponseFormatAac,
 	}
 
 	resp, err := t.client.CreateSpeech(ctx, req)
@@ -57,13 +54,11 @@ func (t *TTSService) GenerateAudio(ctx context.Context, text string) ([]byte, er
 	}
 	defer resp.Close()
 
-	// Read the entire response into a buffer
 	var buf bytes.Buffer
 	if _, err := io.Copy(&buf, resp); err != nil {
 		return nil, fmt.Errorf("failed to read response: %v", err)
 	}
 
-	// Log the generated audio
 	log.Printf("Generated audio for text: %s", text)
 
 	return buf.Bytes(), nil
