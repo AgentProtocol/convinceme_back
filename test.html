@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Agent Chat Interface</title>
-    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <style>
         :root {
             --primary-color: #2196F3;
@@ -160,208 +159,206 @@
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="chat-section">
-            <div class="section-header">
-                <h2>Chat</h2>
-                <div class="status">
-                    <span id="connectionStatus">Disconnected</span>
-                    <span id="audioStatus">Idle</span>
-                </div>
-            </div>
-            <div id="chatMessages" class="chat-messages"></div>
-            <div class="input-section">
-                <textarea id="message" placeholder="Type your message..."></textarea>
-                <button id="sendBtn" onclick="sendMessage()" disabled>Send</button>
-                <button id="connectBtn" onclick="connect()">Connect</button>
-                <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+<div class="container">
+    <div class="chat-section">
+        <div class="section-header">
+            <h2>Chat</h2>
+            <div class="status">
+                <span id="connectionStatus">Disconnected</span>
+                <span id="audioStatus">Idle</span>
             </div>
         </div>
-        <div class="log-section">
-            <div class="section-header">
-                <h2>System Log</h2>
-            </div>
-            <div id="logMessages" class="log-messages"></div>
+        <div id="chatMessages" class="chat-messages"></div>
+        <div class="input-section">
+            <textarea id="message" placeholder="Type your message..."></textarea>
+            <button id="sendBtn" onclick="sendMessage()" disabled>Send</button>
+            <button id="connectBtn" onclick="connect()">Connect</button>
+            <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
         </div>
     </div>
+    <div class="log-section">
+        <div class="section-header">
+            <h2>System Log</h2>
+        </div>
+        <div id="logMessages" class="log-messages"></div>
+    </div>
+</div>
 
-    <audio id="audioPlayer" style="display: none;"></audio>
+<audio id="audioPlayer" style="display: none;"></audio>
 
-    <script>
-        let ws = null;
-        let hls = null;
-        const audioPlayer = document.getElementById('audioPlayer');
+<script>
+    let ws = null;
+    const audioPlayer = document.getElementById('audioPlayer');
+    let audioQueue = [];
+    let isPlaying = false;
 
-        function updateAudioStatus(status) {
-            document.getElementById('audioStatus').textContent = status;
+    function updateAudioStatus(status) {
+        document.getElementById('audioStatus').textContent = status;
+    }
+
+    function log(message, type = 'system') {
+        const logMessages = document.getElementById('logMessages');
+        const logEntry = document.createElement('div');
+        logEntry.className = `log-entry ${type}`;
+        logEntry.textContent = message;
+        logMessages.appendChild(logEntry);
+        logMessages.scrollTop = logMessages.scrollHeight;
+    }
+
+    function addMessage(message, isUser = false, agentName = '') {
+        const chatMessages = document.getElementById('chatMessages');
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message ${isUser ? 'user' : 'agent'}`;
+
+        if (!isUser && agentName) {
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'agent-name';
+            nameSpan.textContent = agentName;
+            messageDiv.appendChild(nameSpan);
         }
 
-        function initializeHLS(streamUrl) {
-            if (!audioPlayer) return;
+        const messageContent = document.createElement('span');
+        messageContent.textContent = message;
+        messageDiv.appendChild(messageContent);
 
-            updateAudioStatus('Loading stream...');
+        chatMessages.appendChild(messageDiv);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
 
-            // Native HLS support in Safari
-            if (audioPlayer.canPlayType('application/vnd.apple.mpegurl')) {
-                audioPlayer.src = streamUrl;
-                audioPlayer.play().catch(error => {
-                    console.error('Native HLS playback error:', error);
-                    updateAudioStatus('Playback error');
-                    log('Native HLS playback error: ' + error.message, 'error');
-                });
-            }
-            // Use HLS.js for other browsers
-            else if (Hls.isSupported()) {
-                if (hls) {
-                    hls.destroy();
-                }
-
-                hls = new Hls({
-                    autoStartLoad: true,
-                    capLevelToPlayerSize: true,
-                    maxLoadingDelay: 0,
-                });
-                hls.loadSource(streamUrl);
-                hls.attachMedia(audioPlayer);
-                
-                hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                    audioPlayer.play().catch(error => {
-                        console.error('HLS.js playback error:', error);
-                        updateAudioStatus('Playback error');
-                        log('HLS.js playback error: ' + error.message, 'error');
-                    });
-                });
-
-                hls.on(Hls.Events.ERROR, (event, data) => {
-                    console.error('HLS.js error:', data);
-                    if (data.fatal) {
-                        updateAudioStatus('Stream error');
-                        log('HLS.js fatal error: ' + data.details, 'error');
-                    }
-                });
-            }
+    function playNextInQueue() {
+        if (audioQueue.length === 0 || isPlaying) {
+            return;
         }
 
-        function log(message, type = 'system') {
-            const logMessages = document.getElementById('logMessages');
-            const logEntry = document.createElement('div');
-            logEntry.className = `log-entry ${type}`;
-            logEntry.textContent = message;
-            logMessages.appendChild(logEntry);
-            logMessages.scrollTop = logMessages.scrollHeight;
-        }
+        isPlaying = true;
+        const nextAudio = audioQueue[0];
+        updateAudioStatus(`Loading ${nextAudio.agent}'s response...`);
 
-        function addMessage(message, isUser = false, agentName = '') {
-            const chatMessages = document.getElementById('chatMessages');
-            const messageDiv = document.createElement('div');
-            messageDiv.className = `message ${isUser ? 'user' : 'agent'}`;
-            
-            if (!isUser && agentName) {
-                const nameSpan = document.createElement('span');
-                nameSpan.className = 'agent-name';
-                nameSpan.textContent = agentName;
-                messageDiv.appendChild(nameSpan);
-            }
-            
-            const textSpan = document.createElement('span');
-            textSpan.className = 'message-text';
-            textSpan.textContent = message;
-            messageDiv.appendChild(textSpan);
-            
-            chatMessages.appendChild(messageDiv);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-        }
+        const audio = new Audio(nextAudio.url);
 
-        function connect() {
-            try {
-                ws = new WebSocket('ws://localhost:8080/ws/conversation');
-                document.getElementById('connectionStatus').textContent = 'Connecting...';
+        audio.addEventListener('playing', () => {
+            updateAudioStatus(`Playing ${nextAudio.agent}'s response...`);
+            log(`Playing ${nextAudio.agent}'s audio response`, 'audio');
+        });
 
-                ws.onopen = () => {
-                    log('Connected to server');
-                    document.getElementById('connectionStatus').textContent = 'Connected';
-                    updateButtonStates(true);
-                };
+        audio.addEventListener('ended', () => {
+            isPlaying = false;
+            audioQueue.shift(); // Remove the played audio from queue
+            updateAudioStatus(audioQueue.length > 0 ? 'Loading next response...' : 'Idle');
+            log(`Finished playing ${nextAudio.agent}'s response`, 'audio');
+            playNextInQueue(); // Play the next audio if available
+        });
 
-                ws.onclose = () => {
-                    log('Disconnected from server');
-                    document.getElementById('connectionStatus').textContent = 'Disconnected';
-                    updateButtonStates(false);
-                    ws = null;
-                };
+        audio.addEventListener('error', (e) => {
+            isPlaying = false;
+            audioQueue.shift(); // Remove the failed audio from queue
+            updateAudioStatus('Error');
+            log(`Error playing ${nextAudio.agent}'s audio: ${e.message}`, 'error');
+            playNextInQueue(); // Try to play the next audio
+        });
 
-                ws.onerror = (error) => {
-                    log(`WebSocket error: ${error}`, 'error');
-                };
+        audio.play().catch(error => {
+            isPlaying = false;
+            audioQueue.shift(); // Remove the failed audio from queue
+            log(`Failed to play ${nextAudio.agent}'s audio: ${error.message}`, 'error');
+            updateAudioStatus('Error');
+            playNextInQueue(); // Try to play the next audio
+        });
+    }
 
-                ws.onmessage = (event) => {
-                    const data = JSON.parse(event.data);
-                    if (data.type === 'text') {
-                        addMessage(data.message, false, data.agent);
-                    }
-                };
+    function queueAudio(url, agent) {
+        audioQueue.push({ url, agent });
+        log(`Queued audio response from ${agent}`, 'audio');
+        playNextInQueue();
+    }
 
-                initializeHLS('http://localhost:8080/hls/playlist.m3u8');
-            } catch (error) {
-                log(`Failed to connect: ${error}`, 'error');
-                updateAudioStatus('Connection failed');
+    function connect() {
+        try {
+            // Use relative WebSocket URL that will work with both HTTP and HTTPS
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/conversation`;
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                log('Connected to server');
+                document.getElementById('connectionStatus').textContent = 'Connected';
+                updateButtonStates(true);
+                // Clear audio queue on new connection
+                audioQueue = [];
+                isPlaying = false;
+                updateAudioStatus('Idle');
+            };
+
+            ws.onclose = () => {
+                log('Disconnected from server');
+                document.getElementById('connectionStatus').textContent = 'Disconnected';
                 updateButtonStates(false);
-            }
+                // Clear audio queue on disconnect
+                audioQueue = [];
+                isPlaying = false;
+                updateAudioStatus('Idle');
+            };
+
+            ws.onerror = (error) => {
+                log('WebSocket error: ' + error.message, 'error');
+                document.getElementById('connectionStatus').textContent = 'Error';
+                updateButtonStates(false);
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+
+                if (data.type === 'text') {
+                    addMessage(data.message, false, data.agent);
+                    log(`Received message from ${data.agent}`);
+                } else if (data.type === 'audio') {
+                    log(`Received audio URL for ${data.agent}`);
+                    queueAudio(data.audioUrl, data.agent);
+                }
+            };
+        } catch (error) {
+            log('Connection error: ' + error.message, 'error');
         }
+    }
 
-        function sendMessage() {
-            if (!ws) {
-                log('Not connected. Please connect first.', 'error');
-                return;
-            }
+    function sendMessage() {
+        const messageInput = document.getElementById('message');
+        const message = messageInput.value.trim();
 
-            const messageInput = document.getElementById('message');
-            const message = messageInput.value.trim();
-            if (!message) return;
-
+        if (message && ws && ws.readyState === WebSocket.OPEN) {
             const data = {
-                topic: "conversation",
-                message: message
+                message: message,
+                topic: 'General Discussion'
             };
 
             ws.send(JSON.stringify(data));
             addMessage(message, true);
             messageInput.value = '';
         }
+    }
 
-        function disconnect() {
-            if (ws) {
-                cleanupAudio();
-                ws.close();
-                log('Disconnected from server');
-                document.getElementById('connectionStatus').textContent = 'Disconnected';
-                updateButtonStates(false);
-            }
-        }
-
-        function cleanupAudio() {
-            if (hls) {
-                hls.destroy();
-                hls = null;
-            }
-            if (audioPlayer) {
-                audioPlayer.pause();
-            }
+    function disconnect() {
+        if (ws) {
+            ws.close();
+            // Clear audio queue on disconnect
+            audioQueue = [];
+            isPlaying = false;
             updateAudioStatus('Idle');
         }
+    }
 
-        function updateButtonStates(connected) {
-            document.getElementById('sendBtn').disabled = !connected;
-            document.getElementById('connectBtn').disabled = connected;
-            document.getElementById('disconnectBtn').disabled = !connected;
+    function updateButtonStates(connected) {
+        document.getElementById('sendBtn').disabled = !connected;
+        document.getElementById('connectBtn').disabled = connected;
+        document.getElementById('disconnectBtn').disabled = !connected;
+    }
+
+    document.getElementById('message').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage();
         }
-
-        document.getElementById('message').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
-            }
-        });
-    </script>
+    });
+</script>
 </body>
 </html>

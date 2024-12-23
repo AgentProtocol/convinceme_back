@@ -3,7 +3,7 @@ package conversation
 import (
 	"context"
 	"fmt"
-	"github.com/neo/convinceme_backend/internal/audio"
+	"log"
 	"time"
 
 	"github.com/neo/convinceme_backend/internal/agent"
@@ -12,12 +12,12 @@ import (
 
 // ConversationConfig holds configuration for the conversation
 type ConversationConfig struct {
-	Topic           string              // Main topic of discussion
-	MaxTurns        int                 // Maximum number of conversation turns
-	TurnDelay       time.Duration       // Delay between turns
-	ResponseStyle   types.ResponseStyle // Style of responses
-	MaxTokens       int                 // Maximum tokens per response
-	TemperatureHigh bool                // If true, use higher temperature for more creative responses
+	Topic           string
+	MaxTurns        int
+	TurnDelay       time.Duration
+	ResponseStyle   types.ResponseStyle
+	MaxTokens       int
+	TemperatureHigh bool
 }
 
 // DefaultConfig returns a default configuration
@@ -51,26 +51,8 @@ func NewConversation(agent1, agent2 *agent.Agent, config ConversationConfig) *Co
 	}
 }
 
-// getPromptStyle returns the prompt modification based on response style
-func (c *Conversation) getPromptStyle() string {
-	switch c.config.ResponseStyle {
-	case types.ResponseStyleFormal:
-		return "Maintain a formal and professional tone."
-	case types.ResponseStyleCasual:
-		return "Keep the tone casual and friendly."
-	case types.ResponseStyleTechnical:
-		return "Use technical language and precise terminology."
-	case types.ResponseStyleDebate:
-		return "Use persuasive and argumentative language."
-	case types.ResponseStyleHumorous:
-		return "Keep the tone light and humorous."
-	default:
-		return "Keep the tone casual and friendly."
-	}
-}
-
 // Start begins the conversation between the agents
-func (c *Conversation) Start(ctx context.Context, hlsManager *audio.HLSManager) error {
+func (c *Conversation) Start(ctx context.Context) error {
 	var lastMessage string
 	interviewer := c.agent1
 	guest := c.agent2
@@ -93,21 +75,42 @@ func (c *Conversation) Start(ctx context.Context, hlsManager *audio.HLSManager) 
 		fmt.Printf("AGENT-%d: %s\n", getAgentNumber(currentAgent, interviewer), response)
 		lastMessage = response
 
-		// Add the response as a new segment
-		segmentName, err := hlsManager.AddSegment([]byte(response), currentAgent.GetName())
+		// Generate audio
+		audioData, err := currentAgent.GenerateAndStreamAudio(ctx, response)
 		if err != nil {
-			return fmt.Errorf("failed to add segment: %v", err)
+			return fmt.Errorf("failed to generate audio: %v", err)
 		}
-		fmt.Printf("Added segment: %s\n", segmentName)
+
+		// Log the generated response and audio
+		log.Printf("Generated response by %s: %s", currentAgent.GetName(), response)
+		log.Printf("Generated audio for %s: %d bytes", currentAgent.GetName(), len(audioData))
 
 		// Switch agents for the next turn
 		currentAgent, otherAgent = otherAgent, currentAgent
 
-		// Add configured delay between turns
+		// Wait before next turn
 		time.Sleep(c.config.TurnDelay)
 	}
 
 	return nil
+}
+
+// getPromptStyle returns the prompt modification based on response style
+func (c *Conversation) getPromptStyle() string {
+	switch c.config.ResponseStyle {
+	case types.ResponseStyleFormal:
+		return "Maintain a formal and professional tone."
+	case types.ResponseStyleCasual:
+		return "Keep the tone casual and friendly."
+	case types.ResponseStyleTechnical:
+		return "Use technical language and precise terminology."
+	case types.ResponseStyleDebate:
+		return "Use persuasive and argumentative language."
+	case types.ResponseStyleHumorous:
+		return "Keep the tone light and humorous."
+	default:
+		return "Keep the tone casual and friendly."
+	}
 }
 
 // getAgentNumber returns 1 for agent1 and 2 for agent2

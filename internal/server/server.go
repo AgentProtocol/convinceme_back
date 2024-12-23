@@ -2,9 +2,12 @@ package server
 
 import (
 	"context"
+	"crypto/tls"
+	"fmt"
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -15,6 +18,13 @@ type Server struct {
 	router       *gin.Engine
 	agents       map[string]*agent.Agent
 	wsWriteMutex sync.Mutex
+	audioCache   map[string]audioCache
+	cacheMutex   sync.RWMutex
+}
+
+type audioCache struct {
+	data      []byte
+	timestamp time.Time
 }
 
 type ConversationMessage struct {
@@ -52,37 +62,60 @@ func NewServer(agents map[string]*agent.Agent) *Server {
 	})
 
 	server := &Server{
-		router: router,
-		agents: agents,
+		router:     router,
+		agents:     agents,
+		audioCache: make(map[string]audioCache),
 	}
 
 	// Setup routes
 	router.GET("/ws/conversation", server.handleConversationWebSocket)
+	router.GET("/api/audio/:id", server.handleAudioStream)
 	router.POST("/api/conversation/start", server.startConversation)
 	router.GET("/api/agents", server.listAgents)
 
-	// Serve static files with custom headers for HLS
-	router.Static("/hls", "./static/hls")
-	router.Use(func(c *gin.Context) {
-		if c.Request.URL.Path[:4] == "/hls" {
-			if len(c.Request.URL.Path) > 5 && c.Request.URL.Path[len(c.Request.URL.Path)-5:] == ".aac" {
-				c.Header("Content-Type", "audio/aac")
-			}
-			if c.Request.URL.Path[len(c.Request.URL.Path)-5:] == ".m3u8" {
-				c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
-				c.Header("Pragma", "no-cache")
-				c.Header("Expires", "0")
-			}
-		} else {
-			// Set no-cache headers for all other static files
-			c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
-			c.Header("Pragma", "no-cache")
-			c.Header("Expires", "0")
-		}
-		c.Next()
-	})
+	// Serve static files
+	router.StaticFile("/", "./test.html")
+	router.Static("/static", "./static")
 
 	return server
+}
+
+// handleAudioStream streams audio data for a given ID
+func (s *Server) handleAudioStream(c *gin.Context) {
+	audioID := c.Param("id")
+
+	s.cacheMutex.RLock()
+	cache, exists := s.audioCache[audioID]
+	s.cacheMutex.RUnlock()
+
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Audio not found"})
+		return
+	}
+
+	// Set headers for audio streaming
+	c.Header("Content-Type", "audio/mp3")
+	c.Header("Content-Length", fmt.Sprintf("%d", len(cache.data)))
+	c.Header("Cache-Control", "public, max-age=31536000")
+
+	// Stream the audio data
+	c.Data(http.StatusOK, "audio/mp3", cache.data)
+
+	// Clean up old cache entries in a separate goroutine
+	go s.cleanupCache()
+}
+
+// cleanupCache removes old cache entries
+func (s *Server) cleanupCache() {
+	s.cacheMutex.Lock()
+	defer s.cacheMutex.Unlock()
+
+	threshold := time.Now().Add(-1 * time.Hour) // Remove entries older than 1 hour
+	for id, cache := range s.audioCache {
+		if cache.timestamp.Before(threshold) {
+			delete(s.audioCache, id)
+		}
+	}
 }
 
 func (s *Server) handleConversationWebSocket(c *gin.Context) {
@@ -137,18 +170,27 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 						return
 					}
 
-					// Generate and stream audio
-					audioPath, err := a.GenerateAndStreamAudio(ctx, response)
+					// Generate audio
+					audioData, err := a.GenerateAndStreamAudio(ctx, response)
 					if err != nil {
 						log.Printf("Failed to generate audio: %v", err)
 						return
 					}
 
+					// Store audio in cache with a unique ID
+					audioID := fmt.Sprintf("%s_%d", a.GetName(), time.Now().UnixNano())
+					s.cacheMutex.Lock()
+					s.audioCache[audioID] = audioCache{
+						data:      audioData,
+						timestamp: time.Now(),
+					}
+					s.cacheMutex.Unlock()
+
 					// Send audio URL
 					audioMsg := map[string]interface{}{
-						"type":      "audio",
-						"agent":     a.GetName(),
-						"audioPath": audioPath,
+						"type":     "audio",
+						"agent":    a.GetName(),
+						"audioUrl": fmt.Sprintf("/api/audio/%s", audioID),
 					}
 					s.wsWriteMutex.Lock()
 					err = ws.WriteJSON(audioMsg)
@@ -191,5 +233,16 @@ func (s *Server) listAgents(c *gin.Context) {
 }
 
 func (s *Server) Run(addr string) error {
-	return s.router.Run(addr)
+	// Create HTTP/2 server
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: s.router,
+		// Enable HTTP/2 support
+		TLSConfig: &tls.Config{
+			NextProtos: []string{"h2", "http/1.1"},
+		},
+	}
+
+	// Start HTTPS server with HTTP/2 support
+	return srv.ListenAndServeTLS("cert.pem", "key.pem")
 }
