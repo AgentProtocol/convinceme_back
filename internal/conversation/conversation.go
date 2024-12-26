@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/neo/convinceme_backend/internal/agent"
+	"github.com/neo/convinceme_backend/internal/player"
 	"github.com/neo/convinceme_backend/internal/types"
 )
 
@@ -23,10 +25,10 @@ type ConversationConfig struct {
 // DefaultConfig returns a default configuration
 func DefaultConfig() ConversationConfig {
 	return ConversationConfig{
-		Topic:           "Radio podcast interview about USA elections 2024",
+		Topic:           "Live radio podcast interview about AI advancements",
 		MaxTurns:        5,
-		TurnDelay:       time.Second,
-		ResponseStyle:   types.ResponseStyleCasual,
+		TurnDelay:       500 * time.Millisecond,      // Reduced delay to 500 milliseconds
+		ResponseStyle:   types.ResponseStyleHumorous, // Set to humorous for more emotional responses
 		MaxTokens:       100,
 		TemperatureHigh: true,
 	}
@@ -34,25 +36,33 @@ func DefaultConfig() ConversationConfig {
 
 // Conversation manages the dialogue between two agents
 type Conversation struct {
-	agent1 *agent.Agent
-	agent2 *agent.Agent
-	config ConversationConfig
+	agent1       *agent.Agent
+	agent2       *agent.Agent
+	config       ConversationConfig
+	inputHandler *player.InputHandler
+	isActive     bool
+	mu           sync.RWMutex
 }
 
 // NewConversation creates a new conversation between two agents
-func NewConversation(agent1, agent2 *agent.Agent, config ConversationConfig) *Conversation {
+func NewConversation(agent1, agent2 *agent.Agent, config ConversationConfig, inputHandler *player.InputHandler) *Conversation {
 	if !config.ResponseStyle.IsValid() {
 		config.ResponseStyle = types.ResponseStyleCasual // fallback to casual if invalid
 	}
 	return &Conversation{
-		agent1: agent1,
-		agent2: agent2,
-		config: config,
+		agent1:       agent1,
+		agent2:       agent2,
+		config:       config,
+		inputHandler: inputHandler,
 	}
 }
 
 // Start begins the conversation between the agents
 func (c *Conversation) Start(ctx context.Context) error {
+	c.mu.Lock()
+	c.isActive = true
+	c.mu.Unlock()
+
 	var lastMessage string
 	interviewer := c.agent1
 	guest := c.agent2
@@ -66,7 +76,26 @@ func (c *Conversation) Start(ctx context.Context) error {
 	stylePrompt := c.getPromptStyle()
 	lastMessage = fmt.Sprintf("Let's start discussing about %s. %s", c.config.Topic, stylePrompt)
 
+	// Create a channel for player interrupts
+	interruptCh := make(chan player.PlayerInput, 1)
+	c.inputHandler.RegisterProcessor(&playerInputProcessor{
+		conversation: c,
+		interruptCh:  interruptCh,
+	})
+
 	for turn := 0; turn < c.config.MaxTurns; turn++ {
+		// Check for player input before generating response
+		select {
+		case input := <-interruptCh:
+			// Handle player interruption
+			if err := c.handlePlayerInterrupt(ctx, input, currentAgent); err != nil {
+				log.Printf("Error handling player interrupt: %v", err)
+			}
+			continue
+		default:
+			// No interruption, proceed with normal flow
+		}
+
 		response, err := currentAgent.GenerateResponse(ctx, c.config.Topic, lastMessage)
 		if err != nil {
 			return fmt.Errorf("failed to generate response: %v", err)
@@ -88,11 +117,62 @@ func (c *Conversation) Start(ctx context.Context) error {
 		// Switch agents for the next turn
 		currentAgent, otherAgent = otherAgent, currentAgent
 
-		// Wait before next turn
-		time.Sleep(c.config.TurnDelay)
+		// Wait before next turn, but allow for interruption
+		select {
+		case <-time.After(c.config.TurnDelay):
+		case input := <-interruptCh:
+			if err := c.handlePlayerInterrupt(ctx, input, currentAgent); err != nil {
+				log.Printf("Error handling player interrupt: %v", err)
+			}
+		}
 	}
 
+	c.mu.Lock()
+	c.isActive = false
+	c.mu.Unlock()
+
 	return nil
+}
+
+// handlePlayerInterrupt processes a player interruption
+func (c *Conversation) handlePlayerInterrupt(ctx context.Context, input player.PlayerInput, currentAgent *agent.Agent) error {
+	// Create a prompt that includes the player's input
+	prompt := fmt.Sprintf(`A player has just interrupted with: "%s"
+Please acknowledge their input and incorporate it naturally into the conversation.
+Be brief but engaging.`, input.Content)
+
+	response, err := currentAgent.GenerateResponse(ctx, c.config.Topic, prompt)
+	if err != nil {
+		return fmt.Errorf("failed to generate interrupt response: %v", err)
+	}
+
+	fmt.Printf("AGENT-%d (responding to player): %s\n", getAgentNumber(currentAgent, c.agent1), response)
+	return nil
+}
+
+// playerInputProcessor implements the InputProcessor interface
+type playerInputProcessor struct {
+	conversation *Conversation
+	interruptCh  chan player.PlayerInput
+}
+
+func (p *playerInputProcessor) ProcessInput(ctx context.Context, input player.PlayerInput) error {
+	// Only process input if conversation is active
+	p.conversation.mu.RLock()
+	isActive := p.conversation.isActive
+	p.conversation.mu.RUnlock()
+
+	if !isActive {
+		return nil
+	}
+
+	// Send input to interrupt channel
+	select {
+	case p.interruptCh <- input:
+		return nil
+	default:
+		return fmt.Errorf("interrupt channel is full")
+	}
 }
 
 // getPromptStyle returns the prompt modification based on response style

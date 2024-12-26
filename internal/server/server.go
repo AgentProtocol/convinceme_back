@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"github.com/neo/convinceme_backend/internal/audio"
 	"log"
 	"net/http"
 	"sync"
@@ -22,16 +23,28 @@ type Server struct {
 	cacheMutex         sync.RWMutex
 	lastPlayerMessage  time.Time
 	playerMessageMutex sync.Mutex
+	lastSpeakingAgent  string
+	agentMutex        sync.RWMutex
+	conversationLog    []ConversationEntry
+	conversationMutex  sync.RWMutex
 }
 
-type audioCache struct {
-	data      []byte
-	timestamp time.Time
+type ConversationEntry struct {
+	Speaker  string    `json:"speaker"`
+	Message  string    `json:"message"`
+	Time     time.Time `json:"time"`
+	IsPlayer bool      `json:"is_player"`
 }
 
 type ConversationMessage struct {
 	Topic   string `json:"topic"`
 	Message string `json:"message"`
+	Type    string `json:"type"`
+}
+
+type audioCache struct {
+	data      []byte
+	timestamp time.Time
 }
 
 var upgrader = websocket.Upgrader{
@@ -66,16 +79,53 @@ func NewServer(agents map[string]*agent.Agent) *Server {
 		agents:            agents,
 		audioCache:        make(map[string]audioCache),
 		lastPlayerMessage: time.Now(),
+		conversationLog:   make([]ConversationEntry, 0),
 	}
 
 	router.GET("/ws/conversation", server.handleConversationWebSocket)
 	router.GET("/api/audio/:id", server.handleAudioStream)
 	router.POST("/api/conversation/start", server.startConversation)
+	router.POST("/api/stt", audio.HandleSTT)
 
 	router.StaticFile("/", "./test.html")
 	router.Static("/static", "./static")
 
 	return server
+}
+
+func (s *Server) addToConversationLog(speaker string, message string, isPlayer bool) {
+	s.conversationMutex.Lock()
+	defer s.conversationMutex.Unlock()
+
+	entry := ConversationEntry{
+		Speaker:  speaker,
+		Message:  message,
+		Time:     time.Now(),
+		IsPlayer: isPlayer,
+	}
+	s.conversationLog = append(s.conversationLog, entry)
+}
+
+func (s *Server) getConversationContext() string {
+	s.conversationMutex.RLock()
+	defer s.conversationMutex.RUnlock()
+
+	var context string
+	// Get last 5 entries or all if less than 5
+	startIdx := len(s.conversationLog) - 5
+	if startIdx < 0 {
+		startIdx = 0
+	}
+
+	for _, entry := range s.conversationLog[startIdx:] {
+		speakerType := "Agent"
+		if entry.IsPlayer {
+			speakerType = "Player"
+		}
+		context += fmt.Sprintf("%s (%s): %s\n", entry.Speaker, speakerType, entry.Message)
+	}
+
+	return context
 }
 
 func (s *Server) handleAudioStream(c *gin.Context) {
@@ -119,160 +169,254 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 	}
 	defer ws.Close()
 
-	ticker := time.NewTicker(2 * time.Minute)
-	defer ticker.Stop()
+	// Set read deadline for initial connection
+	ws.SetReadDeadline(time.Now().Add(time.Second * 60))
 
-	for {
-		select {
-		case <-ticker.C:
-			s.playerMessageMutex.Lock()
-			if time.Since(s.lastPlayerMessage) >= 2*time.Minute {
-				s.continueAgentDiscussion(ws)
-			}
-			s.playerMessageMutex.Unlock()
-		default:
-			var msg ConversationMessage
-			err := ws.ReadJSON(&msg)
-			if err != nil {
-				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-					log.Printf("WebSocket error: %v", err)
+	// Create a done channel to signal goroutine cleanup
+	done := make(chan struct{})
+	defer close(done)
+
+	// Start ping handler
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				if err := ws.WriteJSON(gin.H{"type": "ping"}); err != nil {
+					log.Printf("Failed to send ping: %v", err)
+					return
 				}
+			}
+		}
+	}()
+
+	// Handle incoming messages
+	for {
+		var msg ConversationMessage
+		err := ws.ReadJSON(&msg)
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				log.Printf("WebSocket error: %v", err)
+			}
+			return
+		}
+
+		// Reset read deadline after each successful message
+		ws.SetReadDeadline(time.Now().Add(time.Second * 60))
+
+		// Handle ping messages
+		if msg.Type == "ping" {
+			if err := ws.WriteJSON(gin.H{"type": "pong"}); err != nil {
+				log.Printf("Failed to send pong: %v", err)
 				return
 			}
+			continue
+		}
 
-			s.playerMessageMutex.Lock()
-			s.lastPlayerMessage = time.Now()
-			s.playerMessageMutex.Unlock()
+		s.playerMessageMutex.Lock()
+		s.lastPlayerMessage = time.Now()
+		s.playerMessageMutex.Unlock()
 
-			if msg.Message == "" {
-				s.continueAgentDiscussion(ws)
-			} else {
-				s.handlePlayerMessage(ws, msg)
-			}
+		if msg.Message == "" {
+			s.continueAgentDiscussion(ws)
+		} else {
+			s.handlePlayerMessage(ws, msg)
 		}
 	}
 }
 
-func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
-	ctx := context.Background()
-	var wg sync.WaitGroup
+func (s *Server) getNextAgent() *agent.Agent {
+	s.agentMutex.RLock()
+	lastSpeaker := s.lastSpeakingAgent
+	s.agentMutex.RUnlock()
 
-	for _, agent := range s.agents {
-		a := agent
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-
-			response, err := a.GenerateResponse(ctx, "General Discussion", "")
-			if err != nil {
-				log.Printf("Failed to generate response: %v", err)
-				return
-			}
-
-			textMsg := map[string]interface{}{
-				"type":     "text",
-				"agent":    a.GetName(),
-				"message":  response,
-				"memories": a.GetMemory(),
-			}
-			s.wsWriteMutex.Lock()
-			err = ws.WriteJSON(textMsg)
-			s.wsWriteMutex.Unlock()
-			if err != nil {
-				log.Printf("Failed to write text message: %v", err)
-				return
-			}
-
-			audioData, err := a.GenerateAndStreamAudio(ctx, response)
-			if err != nil {
-				log.Printf("Failed to generate audio: %v", err)
-				return
-			}
-
-			audioID := fmt.Sprintf("%s_%d", a.GetName(), time.Now().UnixNano())
-			s.cacheMutex.Lock()
-			s.audioCache[audioID] = audioCache{
-				data:      audioData,
-				timestamp: time.Now(),
-			}
-			s.cacheMutex.Unlock()
-
-			audioMsg := map[string]interface{}{
-				"type":     "audio",
-				"agent":    a.GetName(),
-				"audioUrl": fmt.Sprintf("/api/audio/%s", audioID),
-			}
-			s.wsWriteMutex.Lock()
-			err = ws.WriteJSON(audioMsg)
-			s.wsWriteMutex.Unlock()
-			if err != nil {
-				log.Printf("Failed to write audio message: %v", err)
-			}
-		}()
+	// Choose the agent that hasn't spoken last
+	for name, agent := range s.agents {
+		if name != lastSpeaker {
+			s.agentMutex.Lock()
+			s.lastSpeakingAgent = name
+			s.agentMutex.Unlock()
+			return agent
+		}
 	}
 
-	wg.Wait()
+	// If no last speaker (first message), pick any agent
+	for name, agent := range s.agents {
+		s.agentMutex.Lock()
+		s.lastSpeakingAgent = name
+		s.agentMutex.Unlock()
+		return agent
+	}
+
+	return nil
 }
 
 func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage) {
-	ctx := context.Background()
-	var wg sync.WaitGroup
+	// Add player message to conversation log
+	s.addToConversationLog("Player", msg.Message, true)
 
-	for _, agent := range s.agents {
-		a := agent
+	// Get conversation context
+	conversationContext := s.getConversationContext()
+
+	// Generate responses from both agents
+	ctx := context.Background()
+	responses := make(map[string]string)
+	var wg sync.WaitGroup
+	var responseMutex sync.Mutex
+
+	for name, a := range s.agents {
 		wg.Add(1)
-		go func() {
+		go func(agentName string, agent *agent.Agent) {
 			defer wg.Done()
 
-			response, err := a.GenerateResponse(ctx, msg.Topic, msg.Message)
+			prompt := fmt.Sprintf(`Current conversation context:
+%s
+
+A player has just said: "%s"
+
+You are %s, with the role of %s.
+Generate a response that:
+1. Shows you understand the full conversation context
+2. Acknowledges the player's message
+3. Stays in character
+4. Maintains natural conversation flow
+5. Is brief but engaging
+6. Interacts with the other agent's previous messages when relevant`,
+				conversationContext,
+				msg.Message,
+				agent.GetName(),
+				agent.GetRole())
+
+			response, err := agent.GenerateResponse(ctx, msg.Topic, prompt)
 			if err != nil {
-				log.Printf("Failed to generate response: %v", err)
+				log.Printf("Failed to generate response for %s: %v", agentName, err)
 				return
 			}
 
-			textMsg := map[string]interface{}{
-				"type":     "text",
-				"agent":    a.GetName(),
-				"message":  response,
-				"memories": a.GetMemory(),
-			}
-			s.wsWriteMutex.Lock()
-			err = ws.WriteJSON(textMsg)
-			s.wsWriteMutex.Unlock()
-			if err != nil {
-				log.Printf("Failed to write text message: %v", err)
-				return
-			}
-
-			audioData, err := a.GenerateAndStreamAudio(ctx, response)
-			if err != nil {
-				log.Printf("Failed to generate audio: %v", err)
-				return
-			}
-
-			audioID := fmt.Sprintf("%s_%d", a.GetName(), time.Now().UnixNano())
-			s.cacheMutex.Lock()
-			s.audioCache[audioID] = audioCache{
-				data:      audioData,
-				timestamp: time.Now(),
-			}
-			s.cacheMutex.Unlock()
-
-			audioMsg := map[string]interface{}{
-				"type":     "audio",
-				"agent":    a.GetName(),
-				"audioUrl": fmt.Sprintf("/api/audio/%s", audioID),
-			}
-			s.wsWriteMutex.Lock()
-			err = ws.WriteJSON(audioMsg)
-			s.wsWriteMutex.Unlock()
-			if err != nil {
-				log.Printf("Failed to write audio message: %v", err)
-			}
-		}()
+			responseMutex.Lock()
+			responses[agentName] = response
+			responseMutex.Unlock()
+		}(name, a)
 	}
 
 	wg.Wait()
+
+	// Send responses in sequence with a delay
+	for name, response := range responses {
+		agent := s.agents[name]
+		
+		// Add agent response to conversation log
+		s.addToConversationLog(name, response, false)
+
+		// Send text response
+		if err := ws.WriteJSON(gin.H{
+			"type":    "text",
+			"message": response,
+			"agent":   name,
+		}); err != nil {
+			log.Printf("Failed to send text response for %s: %v", name, err)
+			continue
+		}
+
+		// Generate and send audio
+		audioData, err := agent.GenerateAndStreamAudio(ctx, response)
+		if err != nil {
+			log.Printf("Failed to generate audio for %s: %v", name, err)
+			continue
+		}
+
+		audioID := fmt.Sprintf("%s_%d", name, time.Now().UnixNano())
+		s.cacheMutex.Lock()
+		s.audioCache[audioID] = audioCache{
+			data:      audioData,
+			timestamp: time.Now(),
+		}
+		s.cacheMutex.Unlock()
+
+		if err := ws.WriteJSON(gin.H{
+			"type":     "audio",
+			"audioUrl": fmt.Sprintf("/api/audio/%s", audioID),
+			"agent":    name,
+		}); err != nil {
+			log.Printf("Failed to send audio URL for %s: %v", name, err)
+		}
+
+		// Add delay between agent responses
+		time.Sleep(2 * time.Second)
+	}
+}
+
+func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
+	// Get conversation context
+	conversationContext := s.getConversationContext()
+
+	// Get the next agent to speak
+	agent := s.getNextAgent()
+	if agent == nil {
+		log.Printf("No agents available")
+		return
+	}
+
+	ctx := context.Background()
+	prompt := fmt.Sprintf(`Current conversation context:
+%s
+
+You are %s, with the role of %s.
+Generate a response that:
+1. Shows you understand the full conversation context
+2. Stays in character
+3. Maintains natural conversation flow
+4. Is brief but engaging
+5. Builds on previous messages when relevant`,
+		conversationContext,
+		agent.GetName(),
+		agent.GetRole())
+
+	response, err := agent.GenerateResponse(ctx, "General Discussion", prompt)
+	if err != nil {
+		log.Printf("Failed to generate response: %v", err)
+		return
+	}
+
+	// Add response to conversation log
+	s.addToConversationLog(agent.GetName(), response, false)
+
+	// Send text response
+	if err := ws.WriteJSON(gin.H{
+		"type":    "text",
+		"message": response,
+		"agent":   agent.GetName(),
+	}); err != nil {
+		log.Printf("Failed to send text response: %v", err)
+		return
+	}
+
+	// Generate and send audio
+	audioData, err := agent.GenerateAndStreamAudio(ctx, response)
+	if err != nil {
+		log.Printf("Failed to generate audio: %v", err)
+		return
+	}
+
+	audioID := fmt.Sprintf("%s_%d", agent.GetName(), time.Now().UnixNano())
+	s.cacheMutex.Lock()
+	s.audioCache[audioID] = audioCache{
+		data:      audioData,
+		timestamp: time.Now(),
+	}
+	s.cacheMutex.Unlock()
+
+	if err := ws.WriteJSON(gin.H{
+		"type":     "audio",
+		"audioUrl": fmt.Sprintf("/api/audio/%s", audioID),
+		"agent":    agent.GetName(),
+	}); err != nil {
+		log.Printf("Failed to send audio URL: %v", err)
+	}
 }
 
 func (s *Server) startConversation(c *gin.Context) {

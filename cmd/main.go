@@ -1,24 +1,31 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
+	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/neo/convinceme_backend/internal/agent"
+	"github.com/neo/convinceme_backend/internal/conversation"
+	"github.com/neo/convinceme_backend/internal/player"
 	"github.com/neo/convinceme_backend/internal/server"
 	"github.com/neo/convinceme_backend/internal/types"
 )
 
 func main() {
+	// Set up logging
+	logger := log.New(os.Stdout, "[ConvinceMe] ", log.LstdFlags|log.Lshortfile)
+
 	// Load environment variables
 	if err := godotenv.Load(); err != nil {
-		log.Fatal("Error loading .env file")
+		logger.Fatal("Error loading .env file")
 	}
 
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
-		log.Fatal("OPENAI_API_KEY is required")
+		logger.Fatal("OPENAI_API_KEY is required")
 	}
 
 	// Create agent configurations
@@ -26,7 +33,7 @@ func main() {
 		Name:        "Elon Musk",
 		Role:        "Billionaire, CEO of SpaceX and Tesla, fanatic Trump supporter",
 		Voice:       types.VoiceFable,
-		Temperature: 1.5,
+		Temperature: 1.5, // Higher temperature for more emotional responses
 		MaxTokens:   50,
 		TopP:        0.9,
 	}
@@ -35,7 +42,7 @@ func main() {
 		Name:        "Joe Rogan",
 		Role:        "Interviewer, host of The Joe Rogan Experience podcast, UFC commentator",
 		Voice:       types.VoiceOnyx,
-		Temperature: 1.5,
+		Temperature: 1.5, // Higher temperature for more emotional responses
 		MaxTokens:   50,
 		TopP:        0.9,
 	}
@@ -43,13 +50,32 @@ func main() {
 	// Create agents
 	agent1, err := agent.NewAgent(apiKey, agent1Config)
 	if err != nil {
-		log.Fatalf("Failed to create agent1: %v", err)
+		logger.Fatalf("Failed to create agent1: %v", err)
 	}
 
 	agent2, err := agent.NewAgent(apiKey, agent2Config)
 	if err != nil {
-		log.Fatalf("Failed to create agent2: %v", err)
+		logger.Fatalf("Failed to create agent2: %v", err)
 	}
+
+	// Create input handler
+	inputHandler := player.NewInputHandler(logger)
+
+	// Define a common topic for the conversation
+	commonTopic := "Political landscape in the United States"
+
+	// Create conversation configuration with the common topic
+	convConfig := conversation.ConversationConfig{
+		Topic:           commonTopic,
+		MaxTurns:        5,
+		TurnDelay:       500 * time.Millisecond,
+		ResponseStyle:   types.ResponseStyleHumorous,
+		MaxTokens:       100,
+		TemperatureHigh: true,
+	}
+
+	// Create a new conversation with the common topic
+	conv := conversation.NewConversation(agent1, agent2, convConfig, inputHandler)
 
 	// Create agents map
 	agents := map[string]*agent.Agent{
@@ -59,8 +85,13 @@ func main() {
 
 	// Create and start the server
 	srv := server.NewServer(agents)
-	log.Println("Starting HTTPS server with HTTP/2 support on :8080...")
+	logger.Println("Starting HTTPS server with HTTP/2 support on :8080...")
 	if err := srv.Run(":8080"); err != nil {
-		log.Fatalf("Server failed: %v", err)
+		logger.Fatalf("Server failed: %v", err)
+	}
+
+	// Start the conversation
+	if err := conv.Start(context.Background()); err != nil {
+		logger.Fatalf("Failed to start conversation: %v", err)
 	}
 }

@@ -174,6 +174,7 @@
             <button id="sendBtn" onclick="sendMessage()" disabled>Send</button>
             <button id="connectBtn" onclick="connect()">Connect</button>
             <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+            <button id="recordBtn" onclick="toggleRecording()">Record</button>
         </div>
     </div>
     <div class="log-section">
@@ -191,6 +192,9 @@
     const audioPlayer = document.getElementById('audioPlayer');
     let audioQueue = [];
     let isPlaying = false;
+    let mediaRecorder;
+    let audioChunks = [];
+    let isRecording = false;
 
     function updateAudioStatus(status) {
         document.getElementById('audioStatus').textContent = status;
@@ -273,69 +277,100 @@
     }
 
     function connect() {
-        try {
-            // Use relative WebSocket URL that will work with both HTTP and HTTPS
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/ws/conversation`;
-            ws = new WebSocket(wsUrl);
+        if (ws) {
+            log('Already connected');
+            return;
+        }
 
-            ws.onopen = () => {
-                log('Connected to server');
-                document.getElementById('connectionStatus').textContent = 'Connected';
-                updateButtonStates(true);
-                // Clear audio queue on new connection
-                audioQueue = [];
-                isPlaying = false;
-                updateAudioStatus('Idle');
-            };
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws/conversation`;
+        
+        ws = new WebSocket(wsUrl);
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 5;
+        const reconnectDelay = 1000; // Start with 1 second
 
-            ws.onclose = () => {
-                log('Disconnected from server');
-                document.getElementById('connectionStatus').textContent = 'Disconnected';
-                updateButtonStates(false);
-                // Clear audio queue on disconnect
-                audioQueue = [];
-                isPlaying = false;
-                updateAudioStatus('Idle');
-            };
+        ws.onopen = () => {
+            log('Connected to server');
+            document.getElementById('connectionStatus').textContent = 'Connected';
+            updateButtonStates(true);
+            reconnectAttempts = 0;
+            startHeartbeat();
+        };
 
-            ws.onerror = (error) => {
-                log('WebSocket error: ' + error.message, 'error');
-                document.getElementById('connectionStatus').textContent = 'Error';
-                updateButtonStates(false);
-            };
+        ws.onclose = (event) => {
+            log('Disconnected from server');
+            document.getElementById('connectionStatus').textContent = 'Disconnected';
+            updateButtonStates(false);
+            stopHeartbeat();
+            ws = null;
 
-            ws.onmessage = (event) => {
-                const data = JSON.parse(event.data);
+            // Attempt to reconnect with exponential backoff
+            if (reconnectAttempts < maxReconnectAttempts) {
+                const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
+                log(`Reconnecting in ${delay/1000} seconds...`);
+                setTimeout(() => {
+                    reconnectAttempts++;
+                    connect();
+                }, delay);
+            } else {
+                log('Max reconnection attempts reached. Please try manually reconnecting.');
+            }
+        };
 
-                if (data.type === 'text') {
-                    addMessage(data.message, false, data.agent);
-                    log(`Received message from ${data.agent}`);
-                } else if (data.type === 'audio') {
-                    log(`Received audio URL for ${data.agent}`);
-                    queueAudio(data.audioUrl, data.agent);
-                }
-            };
-        } catch (error) {
-            log('Connection error: ' + error.message, 'error');
+        ws.onerror = (error) => {
+            log('WebSocket error: ' + error.message, 'error');
+        };
+
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.type === 'pong') {
+                updateConnectionStatus('Connected');
+                return;
+            }
+            handleMessage(data);
+        };
+    }
+
+    // Heartbeat mechanism
+    let heartbeatInterval;
+    function startHeartbeat() {
+        heartbeatInterval = setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'ping' }));
+                updateConnectionStatus('Checking...');
+                // If no pong received within 3 seconds, consider connection dead
+                setTimeout(() => {
+                    if (document.getElementById('connectionStatus').textContent === 'Checking...') {
+                        ws.close();
+                    }
+                }, 3000);
+            }
+        }, 30000); // Send heartbeat every 30 seconds
+    }
+
+    function stopHeartbeat() {
+        if (heartbeatInterval) {
+            clearInterval(heartbeatInterval);
         }
     }
 
-    function sendMessage() {
-        const messageInput = document.getElementById('message');
-        const message = messageInput.value.trim();
+    function updateConnectionStatus(status) {
+        document.getElementById('connectionStatus').textContent = status;
+    }
 
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            const data = {
-                message: message,
-                topic: 'General Discussion'
-            };
+    function handleMessage(data) {
+        if (data.error) {
+            log(data.error, 'error');
+            return;
+        }
 
-            ws.send(JSON.stringify(data));
-            if (message) {
-                addMessage(message, true);
-            }
-            messageInput.value = '';
+        if (data.message) {
+            addMessage(data.message, false, data.agent);
+        }
+
+        if (data.audioUrl) {
+            queueAudio(data.audioUrl, data.agent);
         }
     }
 
@@ -361,6 +396,95 @@
             sendMessage();
         }
     });
+
+    function toggleRecording() {
+        if (isRecording) {
+            stopRecording();
+        } else {
+            startRecording();
+        }
+    }
+
+    function startRecording() {
+        navigator.mediaDevices.getUserMedia({ audio: true })
+            .then(stream => {
+                mediaRecorder = new MediaRecorder(stream);
+                mediaRecorder.ondataavailable = event => {
+                    audioChunks.push(event.data);
+                };
+                mediaRecorder.onstop = () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                    audioChunks = [];
+                    sendAudioToServer(audioBlob);
+                };
+                mediaRecorder.start();
+                isRecording = true;
+                document.getElementById('recordBtn').textContent = 'Stop';
+            })
+            .catch(error => {
+                console.error('Error accessing microphone:', error);
+            });
+    }
+
+    function stopRecording() {
+        mediaRecorder.stop();
+        isRecording = false;
+        document.getElementById('recordBtn').textContent = 'Record';
+    }
+
+    function sendAudioToServer(audioBlob) {
+        const formData = new FormData();
+        formData.append('audio', audioBlob);
+
+        updateAudioStatus('Sending...');
+        fetch('/api/stt', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.text) {
+                log('Speech recognized: ' + data.text);
+                // Send the recognized text through WebSocket
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    const message = {
+                        type: 'text',
+                        message: data.text,
+                        topic: 'USA elections 2024, Joe Biden vs Donald Trump'
+                    };
+                    ws.send(JSON.stringify(message));
+                    addMessage(data.text, true);
+                } else {
+                    log('WebSocket not connected', 'error');
+                }
+            } else if (data.error) {
+                log('Speech recognition error: ' + data.error, 'error');
+            }
+            updateAudioStatus('Idle');
+        })
+        .catch(error => {
+            log('Error sending audio to server: ' + error, 'error');
+            updateAudioStatus('Error');
+        });
+    }
+
+    function sendMessage() {
+        const messageInput = document.getElementById('message');
+        const message = messageInput.value.trim();
+
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            const data = {
+                message: message,
+                topic: 'USA elections 2024, Joe Biden vs Donald Trump',
+            };
+
+            ws.send(JSON.stringify(data));
+            if (message) {
+                addMessage(message, true);
+            }
+            messageInput.value = '';
+        }
+    }
 </script>
 </body>
 </html>
