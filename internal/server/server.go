@@ -15,11 +15,13 @@ import (
 )
 
 type Server struct {
-	router       *gin.Engine
-	agents       map[string]*agent.Agent
-	wsWriteMutex sync.Mutex
-	audioCache   map[string]audioCache
-	cacheMutex   sync.RWMutex
+	router             *gin.Engine
+	agents             map[string]*agent.Agent
+	wsWriteMutex       sync.Mutex
+	audioCache         map[string]audioCache
+	cacheMutex         sync.RWMutex
+	lastPlayerMessage  time.Time
+	playerMessageMutex sync.Mutex
 }
 
 type audioCache struct {
@@ -60,15 +62,15 @@ func NewServer(agents map[string]*agent.Agent) *Server {
 	})
 
 	server := &Server{
-		router:     router,
-		agents:     agents,
-		audioCache: make(map[string]audioCache),
+		router:            router,
+		agents:            agents,
+		audioCache:        make(map[string]audioCache),
+		lastPlayerMessage: time.Now(),
 	}
 
 	router.GET("/ws/conversation", server.handleConversationWebSocket)
 	router.GET("/api/audio/:id", server.handleAudioStream)
 	router.POST("/api/conversation/start", server.startConversation)
-	router.GET("/api/agents", server.listAgents)
 
 	router.StaticFile("/", "./test.html")
 	router.Static("/static", "./static")
@@ -117,77 +119,160 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 	}
 	defer ws.Close()
 
+	ticker := time.NewTicker(2 * time.Minute)
+	defer ticker.Stop()
+
 	for {
-		var msg ConversationMessage
-		err := ws.ReadJSON(&msg)
-		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("WebSocket error: %v", err)
+		select {
+		case <-ticker.C:
+			s.playerMessageMutex.Lock()
+			if time.Since(s.lastPlayerMessage) >= 2*time.Minute {
+				s.continueAgentDiscussion(ws)
 			}
-			break
+			s.playerMessageMutex.Unlock()
+		default:
+			var msg ConversationMessage
+			err := ws.ReadJSON(&msg)
+			if err != nil {
+				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+					log.Printf("WebSocket error: %v", err)
+				}
+				return
+			}
+
+			s.playerMessageMutex.Lock()
+			s.lastPlayerMessage = time.Now()
+			s.playerMessageMutex.Unlock()
+
+			if msg.Message == "" {
+				s.continueAgentDiscussion(ws)
+			} else {
+				s.handlePlayerMessage(ws, msg)
+			}
 		}
+	}
+}
 
+func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
+	ctx := context.Background()
+	var wg sync.WaitGroup
+
+	for _, agent := range s.agents {
+		a := agent
+		wg.Add(1)
 		go func() {
-			ctx := context.Background()
-			var wg sync.WaitGroup
+			defer wg.Done()
 
-			for _, agent := range s.agents {
-				a := agent
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-
-					response, err := a.GenerateResponse(ctx, msg.Topic, msg.Message)
-					if err != nil {
-						log.Printf("Failed to generate response: %v", err)
-						return
-					}
-
-					textMsg := map[string]interface{}{
-						"type":     "text",
-						"agent":    a.GetName(),
-						"message":  response,
-						"memories": a.GetMemory(),
-					}
-					s.wsWriteMutex.Lock()
-					err = ws.WriteJSON(textMsg)
-					s.wsWriteMutex.Unlock()
-					if err != nil {
-						log.Printf("Failed to write text message: %v", err)
-						return
-					}
-
-					audioData, err := a.GenerateAndStreamAudio(ctx, response)
-					if err != nil {
-						log.Printf("Failed to generate audio: %v", err)
-						return
-					}
-
-					audioID := fmt.Sprintf("%s_%d", a.GetName(), time.Now().UnixNano())
-					s.cacheMutex.Lock()
-					s.audioCache[audioID] = audioCache{
-						data:      audioData,
-						timestamp: time.Now(),
-					}
-					s.cacheMutex.Unlock()
-
-					audioMsg := map[string]interface{}{
-						"type":     "audio",
-						"agent":    a.GetName(),
-						"audioUrl": fmt.Sprintf("/api/audio/%s", audioID),
-					}
-					s.wsWriteMutex.Lock()
-					err = ws.WriteJSON(audioMsg)
-					s.wsWriteMutex.Unlock()
-					if err != nil {
-						log.Printf("Failed to write audio message: %v", err)
-					}
-				}()
+			response, err := a.GenerateResponse(ctx, "General Discussion", "")
+			if err != nil {
+				log.Printf("Failed to generate response: %v", err)
+				return
 			}
 
-			wg.Wait()
+			textMsg := map[string]interface{}{
+				"type":     "text",
+				"agent":    a.GetName(),
+				"message":  response,
+				"memories": a.GetMemory(),
+			}
+			s.wsWriteMutex.Lock()
+			err = ws.WriteJSON(textMsg)
+			s.wsWriteMutex.Unlock()
+			if err != nil {
+				log.Printf("Failed to write text message: %v", err)
+				return
+			}
+
+			audioData, err := a.GenerateAndStreamAudio(ctx, response)
+			if err != nil {
+				log.Printf("Failed to generate audio: %v", err)
+				return
+			}
+
+			audioID := fmt.Sprintf("%s_%d", a.GetName(), time.Now().UnixNano())
+			s.cacheMutex.Lock()
+			s.audioCache[audioID] = audioCache{
+				data:      audioData,
+				timestamp: time.Now(),
+			}
+			s.cacheMutex.Unlock()
+
+			audioMsg := map[string]interface{}{
+				"type":     "audio",
+				"agent":    a.GetName(),
+				"audioUrl": fmt.Sprintf("/api/audio/%s", audioID),
+			}
+			s.wsWriteMutex.Lock()
+			err = ws.WriteJSON(audioMsg)
+			s.wsWriteMutex.Unlock()
+			if err != nil {
+				log.Printf("Failed to write audio message: %v", err)
+			}
 		}()
 	}
+
+	wg.Wait()
+}
+
+func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage) {
+	ctx := context.Background()
+	var wg sync.WaitGroup
+
+	for _, agent := range s.agents {
+		a := agent
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			response, err := a.GenerateResponse(ctx, msg.Topic, msg.Message)
+			if err != nil {
+				log.Printf("Failed to generate response: %v", err)
+				return
+			}
+
+			textMsg := map[string]interface{}{
+				"type":     "text",
+				"agent":    a.GetName(),
+				"message":  response,
+				"memories": a.GetMemory(),
+			}
+			s.wsWriteMutex.Lock()
+			err = ws.WriteJSON(textMsg)
+			s.wsWriteMutex.Unlock()
+			if err != nil {
+				log.Printf("Failed to write text message: %v", err)
+				return
+			}
+
+			audioData, err := a.GenerateAndStreamAudio(ctx, response)
+			if err != nil {
+				log.Printf("Failed to generate audio: %v", err)
+				return
+			}
+
+			audioID := fmt.Sprintf("%s_%d", a.GetName(), time.Now().UnixNano())
+			s.cacheMutex.Lock()
+			s.audioCache[audioID] = audioCache{
+				data:      audioData,
+				timestamp: time.Now(),
+			}
+			s.cacheMutex.Unlock()
+
+			audioMsg := map[string]interface{}{
+				"type":     "audio",
+				"agent":    a.GetName(),
+				"audioUrl": fmt.Sprintf("/api/audio/%s", audioID),
+			}
+			s.wsWriteMutex.Lock()
+			err = ws.WriteJSON(audioMsg)
+			s.wsWriteMutex.Unlock()
+			if err != nil {
+				log.Printf("Failed to write audio message: %v", err)
+			}
+		}()
+	}
+
+	wg.Wait()
 }
 
 func (s *Server) startConversation(c *gin.Context) {

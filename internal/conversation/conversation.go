@@ -23,7 +23,7 @@ type ConversationConfig struct {
 // DefaultConfig returns a default configuration
 func DefaultConfig() ConversationConfig {
 	return ConversationConfig{
-		Topic:           "General Discussion",
+		Topic:           "Radio podcast interview about USA elections 2024",
 		MaxTurns:        5,
 		TurnDelay:       time.Second,
 		ResponseStyle:   types.ResponseStyleCasual,

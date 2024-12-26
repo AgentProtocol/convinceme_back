@@ -23,9 +23,9 @@ func main() {
 
 	// Create agent configurations
 	agent1Config := agent.AgentConfig{
-		Name:        "Ilon Musk",
-		Role:        "Technology Expert",
-		Voice:       types.VoiceShimmer,
+		Name:        "Elon Musk",
+		Role:        "Billionaire, CEO of SpaceX and Tesla, fanatic Trump supporter",
+		Voice:       types.VoiceFable,
 		Temperature: 1.5,
 		MaxTokens:   50,
 		TopP:        0.9,
@@ -33,8 +33,8 @@ func main() {
 
 	agent2Config := agent.AgentConfig{
 		Name:        "Joe Rogan",
-		Role:        "Interviewer",
-		Voice:       types.VoiceFable,
+		Role:        "Interviewer, host of The Joe Rogan Experience podcast, UFC commentator",
+		Voice:       types.VoiceOnyx,
 		Temperature: 1.5,
 		MaxTokens:   50,
 		TopP:        0.9,
