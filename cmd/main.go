@@ -20,17 +20,17 @@ func main() {
 
 	// Load environment variables
 	if err := godotenv.Load(); err != nil {
-		logger.Fatal("Error loading .env file")
+		logger.Fatalf("Error loading .env file: %v", err)
 	}
 
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
-		logger.Fatal("OPENAI_API_KEY is required")
+		logger.Fatalf("OPENAI_API_KEY is not set in the environment variables")
 	}
 
 	// Create agent configurations
 	agent1Config := agent.AgentConfig{
-		Name:        "Elon Musk",
+		Name:        "Billionaire, CEO of SpaceX and Tesla, fanatic Trump supporter",
 		Role:        "Billionaire, CEO of SpaceX and Tesla, fanatic Trump supporter",
 		Voice:       types.VoiceFable,
 		Temperature: 1.5, // Higher temperature for more emotional responses
@@ -85,7 +85,7 @@ func main() {
 
 	// Create and start the server
 	srv := server.NewServer(agents)
-	logger.Println("Starting HTTPS server with HTTP/2 support on :8080...")
+	logger.Println("Starting HTTPS server with HTTP/3 support on :8080...")
 	if err := srv.Run(":8080"); err != nil {
 		logger.Fatalf("Server failed: %v", err)
 	}

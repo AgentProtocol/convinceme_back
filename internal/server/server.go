@@ -3,8 +3,10 @@ package server
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"github.com/neo/convinceme_backend/internal/audio"
+	"github.com/quic-go/quic-go/http3"
 	"log"
 	"net/http"
 	"sync"
@@ -24,7 +26,7 @@ type Server struct {
 	lastPlayerMessage  time.Time
 	playerMessageMutex sync.Mutex
 	lastSpeakingAgent  string
-	agentMutex        sync.RWMutex
+	agentMutex         sync.RWMutex
 	conversationLog    []ConversationEntry
 	conversationMutex  sync.RWMutex
 }
@@ -308,7 +310,7 @@ Generate a response that:
 	// Send responses in sequence with a delay
 	for name, response := range responses {
 		agent := s.agents[name]
-		
+
 		// Add agent response to conversation log
 		s.addToConversationLog(name, response, false)
 
@@ -450,9 +452,24 @@ func (s *Server) Run(addr string) error {
 		Addr:    addr,
 		Handler: s.router,
 		TLSConfig: &tls.Config{
-			NextProtos: []string{"h2", "http/1.1"},
+			NextProtos: []string{"h3", "http/1.1"},
 		},
 	}
 
+	// Create an HTTP/3 server
+	http3Srv := &http3.Server{
+		Addr:      addr,
+		Handler:   s.router,
+		TLSConfig: srv.TLSConfig,
+	}
+
+	// Start the HTTP/3 server
+	go func() {
+		if err := http3Srv.ListenAndServeTLS("cert.pem", "key.pem"); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("HTTP/3 server failed: %v", err)
+		}
+	}()
+
+	// Start the HTTP/1.1 and HTTP/2 server
 	return srv.ListenAndServeTLS("cert.pem", "key.pem")
 }
