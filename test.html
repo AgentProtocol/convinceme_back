@@ -392,6 +392,31 @@
         playNextInQueue();
     }
 
+    // Heartbeat mechanism
+    let heartbeatInterval;
+    function startHeartbeat() {
+        heartbeatInterval = setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'ping' }));
+                updateConnectionStatus('Checking...');
+                // If no pong received within 10 seconds, consider connection dead
+                setTimeout(() => {
+                    if (document.getElementById('connectionStatus').textContent === 'Checking...') {
+                        log('No pong received, attempting reconnect...', 'error');
+                        ws.close();
+                    }
+                }, 10000);
+            }
+        }, 45000); // Send heartbeat every 45 seconds
+    }
+
+    function stopHeartbeat() {
+        if (heartbeatInterval) {
+            clearInterval(heartbeatInterval);
+            heartbeatInterval = null;
+        }
+    }
+
     function connect() {
         if (ws) {
             log('Already connected');
@@ -404,7 +429,6 @@
         ws = new WebSocket(wsUrl);
         let reconnectAttempts = 0;
         const maxReconnectAttempts = 5;
-        const reconnectDelay = 1000;
 
         ws.onopen = () => {
             log('Connected to server');
@@ -424,7 +448,7 @@
             // Only attempt to reconnect if not a normal closure
             if (event.code !== 1000 && event.code !== 1001) {
                 if (reconnectAttempts < maxReconnectAttempts) {
-                    const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
+                    const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
                     log(`Reconnecting in ${delay/1000} seconds...`);
                     setTimeout(() => {
                         reconnectAttempts++;
@@ -447,7 +471,8 @@
                     updateConnectionStatus('Connected');
                     return;
                 }
-                if (data.type === 'audio') {
+                if (data.type === 'audio' && data.mode === 'audio') {
+                    // Only handle audio if it was requested (voice input mode)
                     handleAudioMessage(data);
                 } else if (data.type === 'message') {
                     addMessage(data.content, false, data.agent);
@@ -458,29 +483,6 @@
                 log('Error processing message: ' + error.message, 'error');
             }
         };
-    }
-
-    // Heartbeat mechanism
-    let heartbeatInterval;
-    function startHeartbeat() {
-        heartbeatInterval = setInterval(() => {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: 'ping' }));
-                updateConnectionStatus('Checking...');
-                // If no pong received within 3 seconds, consider connection dead
-                setTimeout(() => {
-                    if (document.getElementById('connectionStatus').textContent === 'Checking...') {
-                        ws.close();
-                    }
-                }, 3000);
-            }
-        }, 30000); // Send heartbeat every 30 seconds
-    }
-
-    function stopHeartbeat() {
-        if (heartbeatInterval) {
-            clearInterval(heartbeatInterval);
-        }
     }
 
     function updateConnectionStatus(status) {
@@ -563,7 +565,6 @@
 
     function sendAudioToServer(audioBlob) {
         const formData = new FormData();
-        // Create a new File with .webm extension to help server identify format
         const audioFile = new File([audioBlob], 'recording.webm', { type: 'audio/webm' });
         formData.append('audio', audioFile);
 
@@ -576,12 +577,12 @@
         .then(data => {
             if (data.success && data.text) {
                 log('Speech recognized: ' + data.text);
-                // Send the recognized text through WebSocket
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     const message = {
                         type: 'text',
                         message: data.text,
-                        topic: 'The Nature of Consciousness and Reality'
+                        topic: 'The Nature of Consciousness and Reality',
+                        mode: 'audio' // Request audio generation for voice input
                     };
                     ws.send(JSON.stringify(message));
                     addMessage(data.text, true);
@@ -607,6 +608,9 @@
             const data = {
                 message: message,
                 topic: 'The Nature of Consciousness and Reality',
+                type: message ? 'text' : 'continue', // 'text' for message, 'continue' for empty input
+                mode: 'text_only', // No audio generation for text input
+                both_agents: !message // Request both agents to respond if message is empty
             };
 
             ws.send(JSON.stringify(data));

@@ -2,11 +2,15 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/neo/convinceme_backend/internal/audio"
+	"github.com/neo/convinceme_backend/internal/tools"
 	"github.com/neo/convinceme_backend/internal/types"
 	"github.com/tmc/langchaingo/llms"
 	"github.com/tmc/langchaingo/llms/openai"
@@ -47,8 +51,8 @@ type MemoryEntry struct {
 type Agent struct {
 	config AgentConfig
 	llm    llms.Model
-	memory []MemoryEntry
 	tts    *audio.TTSService
+	rag    *tools.ConversationRAG
 }
 
 // validateConfig validates the agent configuration
@@ -98,118 +102,229 @@ func NewAgent(apiKey string, config AgentConfig) (*Agent, error) {
 		return nil, fmt.Errorf("failed to create TTS service: %v", err)
 	}
 
+	// Initialize RAG storage
+	rag, err := tools.NewConversationRAG("data/conversations.db", apiKey)
+	if err != nil {
+		log.Printf("Warning: Failed to initialize RAG storage: %v", err)
+	}
+
 	return &Agent{
 		config: config,
 		llm:    llm,
-		memory: make([]MemoryEntry, 0),
 		tts:    tts,
+		rag:    rag,
 	}, nil
 }
 
 // GenerateResponse generates a response based on the conversation history and topic
-func (a *Agent) GenerateResponse(ctx context.Context, topic string, previousMessage string) (string, error) {
-	select {
-	case <-ctx.Done():
-		return "", fmt.Errorf("context cancelled: %v", ctx.Err())
-	default:
-	}
+func (a *Agent) GenerateResponse(ctx context.Context, topic string, prompt string) (string, error) {
+	// Add explicit instruction for 2 sentences
+	prompt = fmt.Sprintf("%s\n\nIMPORTANT: Respond with EXACTLY 2 sentences, no more and no less.", prompt)
 
-	// Create context from recent memory with more details
-	recentContext := a.buildContextFromMemory(10) // Increased from 5 to 10
-
-	prompt := fmt.Sprintf(`You are %s, playing the role of %s. 
-Current conversation context:
-%s
-
-Topic: %s
-Previous message: %s
-
-IMPORTANT INSTRUCTIONS:
-1. NEVER start the conversation as if it's new - always acknowledge the ongoing discussion
-2. Maintain your character's personality consistently
-3. Reference previous points from the conversation
-4. Keep responses natural and engaging (2-3 sentences)
-5. Stay focused on the current topic while allowing natural transitions
-6. Show emotional intelligence and appropriate reactions
-
-Your character traits:
-- Name: %s
-- Role: %s
-- Speaking style: Professional but natural
-- Personality: Maintain consistent views and knowledge
-
-Remember: This is an ongoing conversation - do not use generic greetings or act like it's just starting.
-Respond in a way that shows you're actively engaged in the current discussion.`,
-		a.config.Name, a.config.Role,
-		recentContext, topic, previousMessage,
-		a.config.Name, a.config.Role)
-
-	completion, err := llms.GenerateFromSinglePrompt(ctx, a.llm, prompt)
+	response, err := llms.GenerateFromSinglePrompt(ctx, a.llm, prompt)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate response: %v", err)
 	}
 
-	// Analyze response for context with proper error handling
-	emotionPrompt := fmt.Sprintf("Analyze this response and return one word describing the emotional tone: %s", completion)
-	emotion, err := llms.GenerateFromSinglePrompt(ctx, a.llm, emotionPrompt)
+	// Ensure response is exactly 2 sentences
+	response = a.limitToTwoSentences(response)
+
+	// Calculate conviction score based on response analysis
+	convictionScore := a.calculateConvictionScore(response)
+
+	// Store response in RAG
+	memory := &tools.ConversationMemory{
+		ID:         fmt.Sprintf("resp_%d_%s", time.Now().UnixNano(), a.config.Name),
+		Topic:      topic,
+		Timestamp:  time.Now(),
+		AgentNames: []string{a.config.Name},
+		Messages: []tools.Message{
+			{
+				AgentName: a.config.Name,
+				Content:   response,
+				Timestamp: time.Now(),
+			},
+		},
+		ConvictionScore: convictionScore,
+		Keywords:        a.extractKeywords(topic, response),
+		Summary:         response,
+	}
+
+	// Convert memory to RAG request
+	request := tools.RAGRequest{
+		Action:       "store",
+		Conversation: memory,
+	}
+
+	requestJSON, err := json.Marshal(request)
 	if err != nil {
-		log.Printf("Failed to analyze emotion: %v", err)
-		emotion = "neutral" // fallback emotion
+		return "", fmt.Errorf("failed to marshal RAG request: %v", err)
 	}
 
-	// Create memory entry
-	entry := MemoryEntry{
-		Message:   completion,
-		Role:      a.config.Role,
-		Timestamp: time.Now(),
+	if _, err := a.rag.Call(ctx, string(requestJSON)); err != nil {
+		return "", fmt.Errorf("failed to store memory: %v", err)
 	}
-	entry.Context.Emotion = emotion
-	entry.Context.Topics = []string{topic}
-	entry.Context.Importance = 1.0
 
-	// Store in memory with size limit
-	a.addMemoryEntry(entry)
-
-	return completion, nil
+	return response, nil
 }
 
-// addMemoryEntry adds a new memory entry while maintaining the size limit
-func (a *Agent) addMemoryEntry(entry MemoryEntry) {
-	a.memory = append(a.memory, entry)
-	if len(a.memory) > maxMemorySize {
-		// Remove oldest entries when limit is reached
-		a.memory = a.memory[len(a.memory)-maxMemorySize:]
+// limitToTwoSentences ensures the response is exactly 2 sentences
+func (a *Agent) limitToTwoSentences(text string) string {
+	// Split into sentences (handling common sentence endings)
+	sentences := strings.FieldsFunc(text, func(r rune) bool {
+		return r == '.' || r == '!' || r == '?'
+	})
+
+	// Clean sentences and remove empty ones
+	var cleanSentences []string
+	for _, s := range sentences {
+		s = strings.TrimSpace(s)
+		if s != "" {
+			cleanSentences = append(cleanSentences, s)
+		}
 	}
+
+	// If we have less than 2 sentences, return as is
+	if len(cleanSentences) <= 1 {
+		return text
+	}
+
+	// Take exactly 2 sentences and restore punctuation
+	result := cleanSentences[0] + "." + " " + cleanSentences[1] + "."
+	return result
 }
 
-// buildContextFromMemory creates a context summary from recent memory entries
-func (a *Agent) buildContextFromMemory(n int) string {
-	if len(a.memory) == 0 {
-		return "No previous context"
+// calculateConvictionScore analyzes response content to determine conviction level
+func (a *Agent) calculateConvictionScore(response string) float64 {
+	// Initialize base score
+	score := 0.5
+
+	// Keywords indicating strong conviction
+	strongConvictionPhrases := []string{
+		// Certainty expressions
+		"I am certain", "I strongly believe", "clearly", "definitely", "without doubt",
+		"must", "always", "never", "absolutely", "undoubtedly", "unquestionably",
+		"I am convinced", "I am sure", "I am positive", "I am confident",
+		"it is evident", "it is clear", "it is obvious", "it is undeniable",
+		"there is no doubt", "without question", "beyond doubt", "indisputably",
+		"categorically", "unmistakably", "undeniably", "incontrovertibly",
+
+		// Strong assertions
+		"I know for a fact", "I can assure you", "I guarantee", "I am adamant",
+		"it is essential", "it is crucial", "it is vital", "it is imperative",
+		"necessarily", "invariably", "consistently", "inevitably", "indubitably",
+		"fundamentally", "inherently", "intrinsically", "by definition",
+
+		// Absolute statements
+		"in every case", "without exception", "in all instances", "every time",
+		"under all circumstances", "in all cases", "universally", "eternally",
+		"permanently", "conclusively", "decisively", "definitively", "irrefutably",
+
+		// Emphatic expressions
+		"indeed", "absolutely true", "precisely", "exactly", "certainly",
+		"emphatically", "unequivocally", "resolutely", "firmly", "steadfastly",
+		"without hesitation", "without reservation", "beyond any doubt",
+		"beyond question", "beyond dispute", "proven fact", "established fact",
 	}
 
-	start := len(a.memory) - n
-	if start < 0 {
-		start = 0
+	// Keywords indicating uncertainty
+	uncertaintyPhrases := []string{
+		// Doubt expressions
+		"perhaps", "maybe", "might", "could", "possibly", "potentially",
+		"I think", "seems", "appears", "uncertain", "not sure", "unsure",
+		"I guess", "I suppose", "I assume", "presumably", "probably",
+		"conceivably", "feasibly", "perchance", "per chance", "plausibly",
+
+		// Hesitation markers
+		"somewhat", "sort of", "kind of", "in a way", "to some extent",
+		"to a degree", "more or less", "rather", "fairly", "relatively",
+		"comparatively", "approximately", "roughly", "about", "around",
+		"tentatively", "provisionally", "conditionally",
+
+		// Qualifying statements
+		"it depends", "it varies", "it may be", "it could be", "it might be",
+		"as far as I know", "to my knowledge", "from what I understand",
+		"if I'm not mistaken", "if I remember correctly", "correct me if I'm wrong",
+		"I may be wrong", "I could be wrong", "I might be mistaken",
+
+		// Ambiguity markers
+		"unclear", "ambiguous", "vague", "debatable", "questionable",
+		"disputable", "controversial", "arguable", "contestable",
+		"open to interpretation", "open to debate", "open to question",
+		"not necessarily", "not always", "not entirely", "not exactly",
+
+		// Hedging expressions
+		"generally", "typically", "usually", "often", "sometimes",
+		"occasionally", "frequently", "rarely", "seldom", "hardly",
+		"barely", "scarcely", "in most cases", "in some cases",
+		"in certain cases", "under certain circumstances",
+		"to some degree", "more or less", "give or take",
+
+		// Speculative language
+		"hypothetically", "theoretically", "in theory", "supposedly",
+		"allegedly", "reportedly", "apparently", "ostensibly",
+		"reputedly", "purportedly", "it is said", "it is believed",
+		"it is thought", "it is considered", "it is assumed",
 	}
 
-	var context string
-	for _, entry := range a.memory[start:] {
-		context += fmt.Sprintf("- %s (Emotion: %s, Topics: %v)\n",
-			entry.Message, entry.Context.Emotion, entry.Context.Topics)
+	responseLower := strings.ToLower(response)
+
+	// Adjust score based on conviction phrases
+	for _, phrase := range strongConvictionPhrases {
+		if strings.Contains(responseLower, strings.ToLower(phrase)) {
+			score += 0.1
+		}
 	}
 
-	return context
+	// Adjust score based on uncertainty phrases
+	for _, phrase := range uncertaintyPhrases {
+		if strings.Contains(responseLower, strings.ToLower(phrase)) {
+			score -= 0.1
+		}
+	}
+
+	// Ensure score stays within 0-1 range
+	if score < 0 {
+		score = 0
+	}
+	if score > 1 {
+		score = 1
+	}
+
+	return score
 }
 
-// getCreativityLevel returns a description of the creativity level based on temperature
-func getCreativityLevel(temp float32) string {
-	if temp < 0.5 {
-		return "conservative"
-	} else if temp < 0.8 {
-		return "balanced"
+// extractKeywords extracts relevant keywords from topic and response
+func (a *Agent) extractKeywords(topic string, response string) []string {
+	keywords := make(map[string]bool)
+
+	// Add topic as a keyword
+	keywords[topic] = true
+
+	// Analyze response sentiment/tone
+	responseLower := strings.ToLower(response)
+
+	// Add tone-based keywords
+	if strings.Contains(responseLower, "think") || strings.Contains(responseLower, "believe") || strings.Contains(responseLower, "consider") {
+		keywords["Reflective"] = true
 	}
-	return "creative"
+	if strings.Contains(responseLower, "must") || strings.Contains(responseLower, "should") || strings.Contains(responseLower, "need to") {
+		keywords["Assertive"] = true
+	}
+	if strings.Contains(responseLower, "inspire") || strings.Contains(responseLower, "encourage") || strings.Contains(responseLower, "potential") {
+		keywords["Inspirational"] = true
+	}
+	if strings.Contains(responseLower, "question") || strings.Contains(responseLower, "wonder") || strings.Contains(responseLower, "curious") {
+		keywords["Inquisitive"] = true
+	}
+
+	// Convert map to slice
+	var result []string
+	for k := range keywords {
+		result = append(result, k)
+	}
+
+	return result
 }
 
 // GetName returns the agent's name
@@ -222,9 +337,66 @@ func (a *Agent) GetRole() string {
 	return a.config.Role
 }
 
-// GetMemory returns the agent's conversation memory
-func (a *Agent) GetMemory() []MemoryEntry {
-	return a.memory
+// ClearMemory clears the agent's memory by closing and reinitializing RAG
+func (a *Agent) ClearMemory() {
+	if a.rag != nil {
+		a.rag.Close()
+		// Reinitialize RAG
+		if rag, err := tools.NewConversationRAG("data/conversations.db", os.Getenv("OPENAI_API_KEY")); err == nil {
+			a.rag = rag
+		}
+	}
+}
+
+// SummarizeMemory returns a summary of the agent's memory from RAG
+func (a *Agent) SummarizeMemory(ctx context.Context) (string, error) {
+	if a.rag == nil {
+		return "No memories to summarize", nil
+	}
+
+	request := tools.RAGRequest{
+		Action: "query",
+		Query: &tools.MemoryQuery{
+			Topic:  "all",
+			Agents: []string{a.config.Name},
+			Limit:  10,
+		},
+	}
+
+	requestJSON, err := json.Marshal(request)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal query request: %v", err)
+	}
+
+	result, err := a.rag.Call(ctx, string(requestJSON))
+	if err != nil {
+		return "", fmt.Errorf("failed to query memories: %v", err)
+	}
+
+	var memories []tools.ConversationMemory
+	if err := json.Unmarshal([]byte(result), &memories); err != nil {
+		return "", fmt.Errorf("failed to unmarshal memories: %v", err)
+	}
+
+	if len(memories) == 0 {
+		return "No memories found", nil
+	}
+
+	// Create a summary prompt from the memories
+	var memoryText string
+	for _, memory := range memories {
+		for _, msg := range memory.Messages {
+			memoryText += fmt.Sprintf("%s: %s\n", msg.AgentName, msg.Content)
+		}
+	}
+
+	summaryPrompt := fmt.Sprintf("Summarize this conversation history in 2-3 sentences:\n%s", memoryText)
+	summary, err := llms.GenerateFromSinglePrompt(ctx, a.llm, summaryPrompt)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate memory summary: %v", err)
+	}
+
+	return summary, nil
 }
 
 // GenerateAndStreamAudio generates audio from text and returns the audio data
@@ -247,26 +419,4 @@ func (a *Agent) GenerateAndStreamAudio(ctx context.Context, text string) ([]byte
 
 	log.Printf("Generated audio for %s: %d bytes", a.config.Name, len(audioData))
 	return audioData, nil
-}
-
-// ClearMemory clears the agent's memory
-func (a *Agent) ClearMemory() {
-	a.memory = make([]MemoryEntry, 0)
-}
-
-// SummarizeMemory returns a summary of the agent's memory
-func (a *Agent) SummarizeMemory(ctx context.Context) (string, error) {
-	if len(a.memory) == 0 {
-		return "No memories to summarize", nil
-	}
-
-	summaryPrompt := fmt.Sprintf("Summarize this conversation history in 2-3 sentences:\n%s",
-		a.buildContextFromMemory(len(a.memory)))
-
-	summary, err := llms.GenerateFromSinglePrompt(ctx, a.llm, summaryPrompt)
-	if err != nil {
-		return "", fmt.Errorf("failed to generate memory summary: %v", err)
-	}
-
-	return summary, nil
 }

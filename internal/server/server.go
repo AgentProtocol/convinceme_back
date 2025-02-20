@@ -12,12 +12,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/neo/convinceme_backend/internal/agent"
 	"github.com/neo/convinceme_backend/internal/audio"
+	"github.com/neo/convinceme_backend/internal/tools"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
-	"github.com/neo/convinceme_backend/internal/agent"
-	"github.com/neo/convinceme_backend/internal/tools"
 )
 
 type Server struct {
@@ -46,6 +46,7 @@ type ConversationMessage struct {
 	Topic   string `json:"topic"`
 	Message string `json:"message"`
 	Type    string `json:"type"`
+	Mode    string `json:"mode"` // 'text_only' or 'audio'
 }
 
 type audioCache struct {
@@ -68,6 +69,14 @@ type ConvictionUpdate struct {
 		Agent1 ConvictionMetrics `json:"agent1"`
 		Agent2 ConvictionMetrics `json:"agent2"`
 	} `json:"metrics"`
+}
+
+type WebSocketMessage struct {
+	Type     string `json:"type"`
+	Content  string `json:"content,omitempty"`
+	Agent    string `json:"agent,omitempty"`
+	AudioURL string `json:"audioUrl,omitempty"`
+	Mode     string `json:"mode,omitempty"`
 }
 
 var upgrader = websocket.Upgrader{
@@ -215,8 +224,9 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 	}
 	defer ws.Close()
 
-	// Set read deadline for initial connection
-	ws.SetReadDeadline(time.Now().Add(time.Second * 60))
+	// Set initial deadlines
+	ws.SetReadDeadline(time.Now().Add(time.Minute * 5))
+	ws.SetWriteDeadline(time.Now().Add(time.Minute * 5))
 
 	// Create a done channel to signal goroutine cleanup
 	done := make(chan struct{})
@@ -238,12 +248,14 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 				// Get latest conviction metrics
 				metrics := s.analyzeCurrentConviction()
 				if metrics != nil {
+					// Set write deadline for metrics update
+					ws.SetWriteDeadline(time.Now().Add(time.Second * 10))
 					if err := ws.WriteJSON(metrics); err != nil {
 						log.Printf("Failed to send conviction metrics: %v", err)
 						errCh <- fmt.Errorf("failed to send conviction metrics: %v", err)
 						return
 					}
-					log.Printf("Sent conviction metrics update: %+v", metrics)
+					log.Printf("Sent conviction metrics update")
 				}
 			}
 		}
@@ -266,10 +278,11 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 			}
 
 			// Reset read deadline after each successful message
-			ws.SetReadDeadline(time.Now().Add(time.Second * 60))
+			ws.SetReadDeadline(time.Now().Add(time.Minute * 5))
 
 			// Handle ping messages
 			if msg.Type == "ping" {
+				ws.SetWriteDeadline(time.Now().Add(time.Second * 10))
 				if err := ws.WriteJSON(gin.H{"type": "pong"}); err != nil {
 					log.Printf("Failed to send pong: %v", err)
 					return
@@ -330,69 +343,7 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 	conversationContext := s.getConversationContext()
 
 	// Get historical context from RAG if available
-	var historicalContext string
-	if s.rag != nil {
-		// Create memory entry for current conversation
-		memory := &tools.ConversationMemory{
-			ID:         fmt.Sprintf("conv_%d", time.Now().UnixNano()),
-			Topic:      msg.Topic,
-			Timestamp:  time.Now(),
-			AgentNames: make([]string, 0, len(s.agents)),
-			Messages:   make([]tools.Message, 0),
-		}
-
-		// Add agent names
-		for name := range s.agents {
-			memory.AgentNames = append(memory.AgentNames, name)
-		}
-
-		// Add messages from conversation log
-		s.conversationMutex.RLock()
-		for _, entry := range s.conversationLog {
-			memory.Messages = append(memory.Messages, tools.Message{
-				AgentName: entry.Speaker,
-				Content:   entry.Message,
-				Timestamp: entry.Time,
-			})
-		}
-		s.conversationMutex.RUnlock()
-
-		// Store in RAG
-		request := tools.RAGRequest{
-			Action:       "store",
-			Conversation: memory,
-		}
-
-		requestJSON, err := json.Marshal(request)
-		if err == nil {
-			if _, err := s.rag.Call(context.Background(), string(requestJSON)); err != nil {
-				log.Printf("Warning: Failed to store conversation in RAG: %v", err)
-			}
-		}
-
-		// Query for relevant history
-		queryRequest := tools.RAGRequest{
-			Action: "query",
-			Query: &tools.MemoryQuery{
-				Topic:  msg.Topic,
-				Agents: memory.AgentNames,
-				Limit:  3,
-			},
-		}
-
-		queryJSON, err := json.Marshal(queryRequest)
-		if err == nil {
-			if result, err := s.rag.Call(context.Background(), string(queryJSON)); err == nil {
-				var memories []tools.ConversationMemory
-				if err := json.Unmarshal([]byte(result), &memories); err == nil && len(memories) > 0 {
-					historicalContext = "\n\nRelevant historical context:\n"
-					for i, mem := range memories {
-						historicalContext += fmt.Sprintf("%d. %s\n", i+1, mem.Summary)
-					}
-				}
-			}
-		}
-	}
+	historicalContext := s.getHistoricalContext(msg)
 
 	// Generate responses from both agents
 	ctx := context.Background()
@@ -406,27 +357,165 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 		go func(agentName string, agent *agent.Agent) {
 			defer wg.Done()
 
+			// Combine current context with historical context
+			fullContext := conversationContext
+			if historicalContext != "" {
+				fullContext = fmt.Sprintf("%s\n\nBased on previous conversations:\n%s",
+					conversationContext, historicalContext)
+			}
+
 			prompt := fmt.Sprintf(`Current conversation context:
-%s%s
+%s
 
 A player has just said: "%s"
 
 You are %s, with the role of %s.
-Generate a response that:
-1. Shows you understand the full conversation context
-2. Acknowledges the player's message
-3. Stays in character
-4. Maintains natural conversation flow
-5. Is brief but engaging
-6. Interacts with the other agent's previous messages when relevant
-7. References relevant historical context when appropriate`,
-				conversationContext,
-				historicalContext,
+Generate a concise response that:
+1. Addresses the core point in 1-2 sentences
+2. Uses precise, impactful language
+3. Stays true to your character
+4. Maintains conversation flow
+5. Avoids unnecessary elaboration
+6. Makes every word count
+7. References key context when vital`,
+				fullContext,
 				msg.Message,
 				agent.GetName(),
 				agent.GetRole())
 
 			response, err := agent.GenerateResponse(ctx, msg.Topic, prompt)
+			if err != nil {
+				responseMutex.Lock()
+				responseErrors = append(responseErrors, fmt.Errorf("failed to generate response for %s: %v", agentName, err))
+				responseMutex.Unlock()
+				return
+			}
+
+			responseMutex.Lock()
+			responses[agentName] = response
+			responseMutex.Unlock()
+
+			// Store agent's response in RAG immediately
+			memory := &tools.ConversationMemory{
+				ID:         fmt.Sprintf("resp_%d_%s", time.Now().UnixNano(), agentName),
+				Topic:      msg.Topic,
+				Timestamp:  time.Now(),
+				AgentNames: []string{agentName},
+				Messages: []tools.Message{
+					{
+						AgentName: agentName,
+						Content:   response,
+						Timestamp: time.Now(),
+					},
+				},
+			}
+
+			// Store in RAG
+			request := tools.RAGRequest{
+				Action:       "store",
+				Conversation: memory,
+			}
+
+			requestJSON, err := json.Marshal(request)
+			if err == nil {
+				if _, err := s.rag.Call(context.Background(), string(requestJSON)); err != nil {
+					log.Printf("Warning: Failed to store agent response in RAG: %v", err)
+				}
+			}
+		}(name, a)
+	}
+
+	wg.Wait()
+
+	if len(responseErrors) > 0 {
+		return fmt.Errorf("errors generating responses: %v", responseErrors)
+	}
+
+	// Send responses in sequence
+	for name, response := range responses {
+		// Store the message in conversation log
+		s.addToConversationLog(name, response, false)
+
+		// Send text response
+		if err := s.sendWebSocketMessage(ws, WebSocketMessage{
+			Type:    "message",
+			Content: response,
+			Agent:   name,
+		}); err != nil {
+			return fmt.Errorf("failed to send message: %v", err)
+		}
+
+		// Generate and send audio only if in audio mode
+		if msg.Mode == "audio" {
+			audioData, err := s.agents[name].GenerateAndStreamAudio(ctx, response)
+			if err != nil {
+				log.Printf("Warning: Failed to generate audio for %s: %v", name, err)
+				continue
+			}
+
+			// Save audio file and send URL
+			audioURL, err := s.saveAndGetAudioURL(name, audioData)
+			if err != nil {
+				log.Printf("Warning: Failed to save audio for %s: %v", name, err)
+				continue
+			}
+
+			if err := s.sendWebSocketMessage(ws, WebSocketMessage{
+				Type:     "audio",
+				AudioURL: audioURL,
+				Agent:    name,
+				Mode:     "audio",
+			}); err != nil {
+				log.Printf("Warning: Failed to send audio message for %s: %v", name, err)
+			}
+		}
+
+		// Add delay between responses
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	return nil
+}
+
+func (s *Server) continueAgentDiscussion(ws *websocket.Conn) error {
+	// Get conversation context
+	conversationContext := s.getConversationContext()
+
+	// Get historical context from RAG if available
+	historicalContext := s.getHistoricalContext(ConversationMessage{
+		Topic: "General Discussion",
+		Type:  "continue",
+	})
+
+	// Generate responses from both agents
+	ctx := context.Background()
+	responses := make(map[string]string)
+	var wg sync.WaitGroup
+	var responseMutex sync.Mutex
+	var responseErrors []error
+
+	for name, a := range s.agents {
+		wg.Add(1)
+		go func(agentName string, a *agent.Agent) {
+			defer wg.Done()
+
+			prompt := fmt.Sprintf(`Current conversation context:
+%s%s
+
+You are %s, with the role of %s.
+Continue the conversation with a brief response that:
+1. Makes a single clear point
+2. Uses minimal but impactful words
+3. Stays true to your character
+4. Maintains dialogue flow
+5. Focuses on the essential
+6. Builds on previous insights concisely`,
+				conversationContext,
+				historicalContext,
+				a.GetName(),
+				a.GetRole())
+
+			response, err := a.GenerateResponse(ctx, "General Discussion", prompt)
 			if err != nil {
 				responseMutex.Lock()
 				responseErrors = append(responseErrors, fmt.Errorf("failed to generate response for %s: %v", agentName, err))
@@ -446,188 +535,22 @@ Generate a response that:
 		return fmt.Errorf("errors generating responses: %v", responseErrors)
 	}
 
-	// Send responses in sequence with a delay
+	// Send responses in sequence
 	for name, response := range responses {
-		agent := s.agents[name]
-
-		// Add agent response to conversation log
+		// Store the message in conversation log
 		s.addToConversationLog(name, response, false)
 
 		// Send text response
-		if err := ws.WriteJSON(gin.H{
-			"type":    "message",
-			"content": response,
-			"agent":   name,
+		if err := s.sendWebSocketMessage(ws, WebSocketMessage{
+			Type:    "message",
+			Content: response,
+			Agent:   name,
 		}); err != nil {
-			return fmt.Errorf("failed to send text response for %s: %v", name, err)
+			return fmt.Errorf("failed to send message: %v", err)
 		}
 
-		// Generate and send audio with retries
-		var audioData []byte
-		var err error
-		for retries := 0; retries < 3; retries++ {
-			audioData, err = agent.GenerateAndStreamAudio(ctx, response)
-			if err == nil {
-				break
-			}
-			time.Sleep(time.Second * time.Duration(retries+1))
-		}
-		if err != nil {
-			return fmt.Errorf("failed to generate audio for %s after retries: %v", name, err)
-		}
-
-		audioID := fmt.Sprintf("%s_%d", name, time.Now().UnixNano())
-		s.cacheMutex.Lock()
-		s.audioCache[audioID] = audioCache{
-			data:      audioData,
-			timestamp: time.Now(),
-		}
-		s.cacheMutex.Unlock()
-
-		if err := ws.WriteJSON(gin.H{
-			"type":     "audio",
-			"audioUrl": fmt.Sprintf("/api/audio/%s", audioID),
-			"agent":    name,
-		}); err != nil {
-			return fmt.Errorf("failed to send audio URL for %s: %v", name, err)
-		}
-
-		// Add delay between agent responses
+		// Add a small delay between responses
 		time.Sleep(500 * time.Millisecond)
-	}
-
-	return nil
-}
-
-func (s *Server) continueAgentDiscussion(ws *websocket.Conn) error {
-	// Get conversation context
-	conversationContext := s.getConversationContext()
-
-	// Get historical context from RAG if available
-	var historicalContext string
-	if s.rag != nil {
-		// Create memory entry for current conversation
-		memory := &tools.ConversationMemory{
-			ID:         fmt.Sprintf("conv_%d", time.Now().UnixNano()),
-			Topic:      "General Discussion",
-			Timestamp:  time.Now(),
-			AgentNames: make([]string, 0, len(s.agents)),
-			Messages:   make([]tools.Message, 0),
-		}
-
-		// Add agent names
-		for name := range s.agents {
-			memory.AgentNames = append(memory.AgentNames, name)
-		}
-
-		// Add messages from conversation log
-		s.conversationMutex.RLock()
-		for _, entry := range s.conversationLog {
-			memory.Messages = append(memory.Messages, tools.Message{
-				AgentName: entry.Speaker,
-				Content:   entry.Message,
-				Timestamp: entry.Time,
-			})
-		}
-		s.conversationMutex.RUnlock()
-
-		// Store in RAG
-		request := tools.RAGRequest{
-			Action:       "store",
-			Conversation: memory,
-		}
-
-		requestJSON, err := json.Marshal(request)
-		if err == nil {
-			if _, err := s.rag.Call(context.Background(), string(requestJSON)); err != nil {
-				log.Printf("Warning: Failed to store conversation in RAG: %v", err)
-			}
-		}
-
-		// Query for relevant history
-		queryRequest := tools.RAGRequest{
-			Action: "query",
-			Query: &tools.MemoryQuery{
-				Topic:  "General Discussion",
-				Agents: memory.AgentNames,
-				Limit:  3,
-			},
-		}
-
-		queryJSON, err := json.Marshal(queryRequest)
-		if err == nil {
-			if result, err := s.rag.Call(context.Background(), string(queryJSON)); err == nil {
-				var memories []tools.ConversationMemory
-				if err := json.Unmarshal([]byte(result), &memories); err == nil && len(memories) > 0 {
-					historicalContext = "\n\nRelevant historical context:\n"
-					for i, mem := range memories {
-						historicalContext += fmt.Sprintf("%d. %s\n", i+1, mem.Summary)
-					}
-				}
-			}
-		}
-	}
-
-	// Get the next agent to speak
-	agent := s.getNextAgent()
-	if agent == nil {
-		return fmt.Errorf("no agents available")
-	}
-
-	ctx := context.Background()
-	prompt := fmt.Sprintf(`Current conversation context:
-%s%s
-
-You are %s, with the role of %s.
-Generate a response that:
-1. Shows you understand the full conversation context
-2. Stays in character
-3. Maintains natural conversation flow
-4. Is brief but engaging
-5. Builds on previous messages when relevant
-6. References relevant historical context when appropriate`,
-		conversationContext,
-		historicalContext,
-		agent.GetName(),
-		agent.GetRole())
-
-	response, err := agent.GenerateResponse(ctx, "General Discussion", prompt)
-	if err != nil {
-		return fmt.Errorf("failed to generate response: %v", err)
-	}
-
-	// Add response to conversation log
-	s.addToConversationLog(agent.GetName(), response, false)
-
-	// Send text response
-	if err := ws.WriteJSON(gin.H{
-		"type":    "text",
-		"message": response,
-		"agent":   agent.GetName(),
-	}); err != nil {
-		return fmt.Errorf("failed to send text response: %v", err)
-	}
-
-	// Generate and send audio
-	audioData, err := agent.GenerateAndStreamAudio(ctx, response)
-	if err != nil {
-		return fmt.Errorf("failed to generate audio: %v", err)
-	}
-
-	audioID := fmt.Sprintf("%s_%d", agent.GetName(), time.Now().UnixNano())
-	s.cacheMutex.Lock()
-	s.audioCache[audioID] = audioCache{
-		data:      audioData,
-		timestamp: time.Now(),
-	}
-	s.cacheMutex.Unlock()
-
-	if err := ws.WriteJSON(gin.H{
-		"type":     "audio",
-		"audioUrl": fmt.Sprintf("/api/audio/%s", audioID),
-		"agent":    agent.GetName(),
-	}); err != nil {
-		return fmt.Errorf("failed to send audio URL: %v", err)
 	}
 
 	return nil
@@ -831,4 +754,105 @@ func (s *Server) Close() error {
 		}
 	}
 	return nil
+}
+
+// sendWebSocketMessage sends a message through the WebSocket connection
+func (s *Server) sendWebSocketMessage(ws *websocket.Conn, msg WebSocketMessage) error {
+	s.wsWriteMutex.Lock()
+	defer s.wsWriteMutex.Unlock()
+
+	// Set write deadline for each message
+	ws.SetWriteDeadline(time.Now().Add(time.Second * 10))
+	return ws.WriteJSON(msg)
+}
+
+// getHistoricalContext retrieves relevant historical context from RAG
+func (s *Server) getHistoricalContext(msg ConversationMessage) string {
+	if s.rag == nil {
+		return ""
+	}
+
+	// Create memory entry for current conversation
+	memory := &tools.ConversationMemory{
+		ID:         fmt.Sprintf("conv_%d", time.Now().UnixNano()),
+		Topic:      msg.Topic,
+		Timestamp:  time.Now(),
+		AgentNames: make([]string, 0, len(s.agents)),
+		Messages:   make([]tools.Message, 0),
+	}
+
+	// Add agent names
+	for name := range s.agents {
+		memory.AgentNames = append(memory.AgentNames, name)
+	}
+
+	// Add messages from conversation log
+	s.conversationMutex.RLock()
+	for _, entry := range s.conversationLog {
+		memory.Messages = append(memory.Messages, tools.Message{
+			AgentName: entry.Speaker,
+			Content:   entry.Message,
+			Timestamp: entry.Time,
+		})
+	}
+	s.conversationMutex.RUnlock()
+
+	// Store in RAG
+	request := tools.RAGRequest{
+		Action:       "store",
+		Conversation: memory,
+	}
+
+	requestJSON, err := json.Marshal(request)
+	if err == nil {
+		if _, err := s.rag.Call(context.Background(), string(requestJSON)); err != nil {
+			log.Printf("Warning: Failed to store conversation in RAG: %v", err)
+		}
+	}
+
+	// Query for relevant history
+	queryRequest := tools.RAGRequest{
+		Action: "query",
+		Query: &tools.MemoryQuery{
+			Topic:  msg.Topic,
+			Agents: memory.AgentNames,
+			Limit:  3,
+		},
+	}
+
+	queryJSON, err := json.Marshal(queryRequest)
+	if err != nil {
+		return ""
+	}
+
+	result, err := s.rag.Call(context.Background(), string(queryJSON))
+	if err != nil {
+		return ""
+	}
+
+	var memories []tools.ConversationMemory
+	if err := json.Unmarshal([]byte(result), &memories); err != nil || len(memories) == 0 {
+		return ""
+	}
+
+	historicalContext := "\n\nRelevant historical context:\n"
+	for i, mem := range memories {
+		historicalContext += fmt.Sprintf("%d. %s\n", i+1, mem.Summary)
+	}
+
+	return historicalContext
+}
+
+// saveAndGetAudioURL saves audio data and returns its URL
+func (s *Server) saveAndGetAudioURL(agentName string, audioData []byte) (string, error) {
+	audioID := fmt.Sprintf("%s_%d", agentName, time.Now().UnixNano())
+
+	s.cacheMutex.Lock()
+	s.audioCache[audioID] = audioCache{
+		data:      audioData,
+		timestamp: time.Now(),
+	}
+	s.cacheMutex.Unlock()
+
+	return fmt.Sprintf("/api/audio/%s", audioID), nil
 }

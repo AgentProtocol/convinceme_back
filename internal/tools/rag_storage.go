@@ -129,6 +129,22 @@ func createTables(db *sql.DB) error {
 
 // StoreMemory stores a conversation memory with vector embedding
 func (s *RAGStorage) StoreMemory(ctx context.Context, memory *ConversationMemory) error {
+	// Check for existing conversation with same content
+	var existingID string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT id FROM conversations 
+		WHERE topic = ? AND agent_names = ? AND timestamp >= datetime('now', '-1 minute')
+	`, memory.Topic, memory.AgentNames).Scan(&existingID)
+
+	if err != nil && err != sql.ErrNoRows {
+		return fmt.Errorf("failed to check for existing conversation: %v", err)
+	}
+
+	if existingID != "" {
+		// Skip if duplicate found within last minute
+		return nil
+	}
+
 	// Generate embedding for the conversation
 	text := fmt.Sprintf("%s %s", memory.Topic, memory.Summary)
 	for _, msg := range memory.Messages {
@@ -175,16 +191,31 @@ func (s *RAGStorage) StoreMemory(ctx context.Context, memory *ConversationMemory
 		return fmt.Errorf("failed to insert conversation: %v", err)
 	}
 
-	// Store messages
+	// Store messages with duplicate check
 	for _, msg := range memory.Messages {
-		_, err = tx.ExecContext(ctx, `
-			INSERT INTO messages (
-				conversation_id, agent_name, content, timestamp
-			) VALUES (?, ?, ?, ?)`,
-			memory.ID, msg.AgentName, msg.Content, msg.Timestamp,
-		)
+		// Check for duplicate message
+		var exists bool
+		err := tx.QueryRowContext(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM messages 
+				WHERE conversation_id = ? AND agent_name = ? AND content = ? AND timestamp >= datetime('now', '-1 minute')
+			)
+		`, memory.ID, msg.AgentName, msg.Content).Scan(&exists)
+
 		if err != nil {
-			return fmt.Errorf("failed to insert message: %v", err)
+			return fmt.Errorf("failed to check for duplicate message: %v", err)
+		}
+
+		if !exists {
+			_, err = tx.ExecContext(ctx, `
+				INSERT INTO messages (
+					conversation_id, agent_name, content, timestamp
+				) VALUES (?, ?, ?, ?)`,
+				memory.ID, msg.AgentName, msg.Content, msg.Timestamp,
+			)
+			if err != nil {
+				return fmt.Errorf("failed to insert message: %v", err)
+			}
 		}
 	}
 

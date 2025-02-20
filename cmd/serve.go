@@ -57,19 +57,19 @@ accepting connections.`,
 		// Create agent configurations
 		agent1Config := agent.AgentConfig{
 			Name:        "Socrates",
-			Role:        "Ancient philosopher known for the Socratic method, questioning assumptions, and seeking truth through dialogue. Expert in ethics, epistemology, and human nature.",
+			Role:        "Ancient philosopher known for concise, pointed questions and brief, impactful insights. Master of the Socratic method, cutting to the heart of matters with minimal words.",
 			Voice:       types.VoiceEcho,
-			Temperature: 1.7,  // Higher temperature for more creative and philosophical responses
-			MaxTokens:   200,  // Increased for more detailed responses
-			TopP:        0.95, // Higher top_p for more diverse language
+			Temperature: 1.7,
+			MaxTokens:   100, // Reduced for more concise responses
+			TopP:        0.95,
 		}
 
 		agent2Config := agent.AgentConfig{
 			Name:        "Nova",
-			Role:        "Modern futurist and technological philosopher, exploring the intersection of consciousness, reality, and digital existence. Expert in emerging technologies and their impact on human society.",
+			Role:        "Modern futurist and technological philosopher who delivers sharp, precise insights about consciousness and digital existence. Known for clear, impactful statements.",
 			Voice:       types.VoiceNova,
 			Temperature: 1.7,
-			MaxTokens:   200,
+			MaxTokens:   100, // Reduced for more concise responses
 			TopP:        0.95,
 		}
 
