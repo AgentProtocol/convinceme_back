@@ -1,2 +1,39 @@
+# Environment variables
 .env
+
+# Certificates
+*.pem
+*.csr
+
+# Binary files
+bin/
+tmp/
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Dependency directories
+vendor/
+
+# Database files
+data/
+*.db
+*.sqlite
+
+# Log files
+*.log
+
+# Air temporary files
+tmp/
+build-errors.log
+
+# macOS files
+.DS_Store
+
+# Test coverage
+coverage.out
+
 /static/hls/*

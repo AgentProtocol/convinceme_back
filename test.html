@@ -48,6 +48,16 @@
             height: 80vh;
         }
 
+        .conviction-section {
+            flex: 1;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            height: 80vh;
+        }
+
         .section-header {
             padding: 15px;
             border-bottom: 1px solid var(--border-color);
@@ -156,6 +166,37 @@
             background-color: #e8f5e9;
             color: #2e7d32;
         }
+
+        .conviction-metrics {
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .agent-conviction {
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 15px;
+        }
+
+        .metric {
+            margin: 10px 0;
+        }
+
+        .meter {
+            height: 20px;
+            background-color: #f0f0f0;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        .meter-fill {
+            height: 100%;
+            background-color: var(--primary-color);
+            width: 0%;
+            transition: width 0.5s ease-in-out;
+        }
     </style>
 </head>
 <body>
@@ -182,6 +223,79 @@
             <h2>System Log</h2>
         </div>
         <div id="logMessages" class="log-messages"></div>
+    </div>
+    <div class="conviction-section">
+        <div class="section-header">
+            <h2>Conviction Rates</h2>
+        </div>
+        <div class="conviction-metrics">
+            <div class="agent-conviction">
+                <h3 id="agent1Name">Agent 1</h3>
+                <div class="metric">
+                    <label>Confidence:</label>
+                    <div class="meter">
+                        <div id="agent1Confidence" class="meter-fill"></div>
+                    </div>
+                </div>
+                <div class="metric">
+                    <label>Consistency:</label>
+                    <div class="meter">
+                        <div id="agent1Consistency" class="meter-fill"></div>
+                    </div>
+                </div>
+                <div class="metric">
+                    <label>Persuasiveness:</label>
+                    <div class="meter">
+                        <div id="agent1Persuasiveness" class="meter-fill"></div>
+                    </div>
+                </div>
+                <div class="metric">
+                    <label>Emotional Impact:</label>
+                    <div class="meter">
+                        <div id="agent1EmotionalImpact" class="meter-fill"></div>
+                    </div>
+                </div>
+                <div class="metric">
+                    <label>Overall:</label>
+                    <div class="meter">
+                        <div id="agent1Overall" class="meter-fill"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="agent-conviction">
+                <h3 id="agent2Name">Agent 2</h3>
+                <div class="metric">
+                    <label>Confidence:</label>
+                    <div class="meter">
+                        <div id="agent2Confidence" class="meter-fill"></div>
+                    </div>
+                </div>
+                <div class="metric">
+                    <label>Consistency:</label>
+                    <div class="meter">
+                        <div id="agent2Consistency" class="meter-fill"></div>
+                    </div>
+                </div>
+                <div class="metric">
+                    <label>Persuasiveness:</label>
+                    <div class="meter">
+                        <div id="agent2Persuasiveness" class="meter-fill"></div>
+                    </div>
+                </div>
+                <div class="metric">
+                    <label>Emotional Impact:</label>
+                    <div class="meter">
+                        <div id="agent2EmotionalImpact" class="meter-fill"></div>
+                    </div>
+                </div>
+                <div class="metric">
+                    <label>Overall:</label>
+                    <div class="meter">
+                        <div id="agent2Overall" class="meter-fill"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -238,36 +352,38 @@
         const nextAudio = audioQueue[0];
         updateAudioStatus(`Loading ${nextAudio.agent}'s response...`);
 
-        const audio = new Audio(nextAudio.url);
-
-        audio.addEventListener('playing', () => {
+        const audio = new Audio();
+        
+        audio.addEventListener('canplaythrough', () => {
             updateAudioStatus(`Playing ${nextAudio.agent}'s response...`);
             log(`Playing ${nextAudio.agent}'s audio response`, 'audio');
+            audio.play().catch(error => {
+                log(`Playback error: ${error.message}`, 'error');
+                isPlaying = false;
+                audioQueue.shift();
+                updateAudioStatus('Error');
+                playNextInQueue();
+            });
         });
 
         audio.addEventListener('ended', () => {
             isPlaying = false;
-            audioQueue.shift(); // Remove the played audio from queue
+            audioQueue.shift();
             updateAudioStatus(audioQueue.length > 0 ? 'Loading next response...' : 'Idle');
             log(`Finished playing ${nextAudio.agent}'s response`, 'audio');
-            playNextInQueue(); // Play the next audio if available
+            playNextInQueue();
         });
 
         audio.addEventListener('error', (e) => {
+            log(`Audio error: ${e.target.error.message}`, 'error');
             isPlaying = false;
-            audioQueue.shift(); // Remove the failed audio from queue
+            audioQueue.shift();
             updateAudioStatus('Error');
-            log(`Error playing ${nextAudio.agent}'s audio: ${e.message}`, 'error');
-            playNextInQueue(); // Try to play the next audio
+            playNextInQueue();
         });
 
-        audio.play().catch(error => {
-            isPlaying = false;
-            audioQueue.shift(); // Remove the failed audio from queue
-            log(`Failed to play ${nextAudio.agent}'s audio: ${error.message}`, 'error');
-            updateAudioStatus('Error');
-            playNextInQueue(); // Try to play the next audio
-        });
+        audio.src = nextAudio.url;
+        audio.load();
     }
 
     function queueAudio(url, agent) {
@@ -288,7 +404,7 @@
         ws = new WebSocket(wsUrl);
         let reconnectAttempts = 0;
         const maxReconnectAttempts = 5;
-        const reconnectDelay = 1000; // Start with 1 second
+        const reconnectDelay = 1000;
 
         ws.onopen = () => {
             log('Connected to server');
@@ -305,30 +421,42 @@
             stopHeartbeat();
             ws = null;
 
-            // Attempt to reconnect with exponential backoff
-            if (reconnectAttempts < maxReconnectAttempts) {
-                const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
-                log(`Reconnecting in ${delay/1000} seconds...`);
-                setTimeout(() => {
-                    reconnectAttempts++;
-                    connect();
-                }, delay);
-            } else {
-                log('Max reconnection attempts reached. Please try manually reconnecting.');
+            // Only attempt to reconnect if not a normal closure
+            if (event.code !== 1000 && event.code !== 1001) {
+                if (reconnectAttempts < maxReconnectAttempts) {
+                    const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
+                    log(`Reconnecting in ${delay/1000} seconds...`);
+                    setTimeout(() => {
+                        reconnectAttempts++;
+                        connect();
+                    }, delay);
+                } else {
+                    log('Max reconnection attempts reached. Please try manually reconnecting.');
+                }
             }
         };
 
         ws.onerror = (error) => {
-            log('WebSocket error: ' + error.message, 'error');
+            log('WebSocket error: ' + (error.message || 'Unknown error'), 'error');
         };
 
         ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            if (data.type === 'pong') {
-                updateConnectionStatus('Connected');
-                return;
+            try {
+                const data = JSON.parse(event.data);
+                if (data.type === 'pong') {
+                    updateConnectionStatus('Connected');
+                    return;
+                }
+                if (data.type === 'audio') {
+                    handleAudioMessage(data);
+                } else if (data.type === 'message') {
+                    addMessage(data.content, false, data.agent);
+                } else if (data.type === 'conviction') {
+                    updateConvictionRates(data.metrics);
+                }
+            } catch (error) {
+                log('Error processing message: ' + error.message, 'error');
             }
-            handleMessage(data);
         };
     }
 
@@ -359,19 +487,15 @@
         document.getElementById('connectionStatus').textContent = status;
     }
 
-    function handleMessage(data) {
-        if (data.error) {
-            log(data.error, 'error');
+    function handleAudioMessage(data) {
+        if (!data.audioUrl) {
+            log('Invalid audio message: missing URL', 'error');
             return;
         }
-
-        if (data.message) {
-            addMessage(data.message, false, data.agent);
-        }
-
-        if (data.audioUrl) {
-            queueAudio(data.audioUrl, data.agent);
-        }
+        
+        // Add timestamp to URL to prevent caching
+        const url = `${data.audioUrl}?t=${Date.now()}`;
+        queueAudio(url, data.agent);
     }
 
     function disconnect() {
@@ -408,21 +532,26 @@
     function startRecording() {
         navigator.mediaDevices.getUserMedia({ audio: true })
             .then(stream => {
-                mediaRecorder = new MediaRecorder(stream);
+                // Use WebM format with Opus codec for better compatibility
+                mediaRecorder = new MediaRecorder(stream, {
+                    mimeType: 'audio/webm;codecs=opus'
+                });
                 mediaRecorder.ondataavailable = event => {
                     audioChunks.push(event.data);
                 };
                 mediaRecorder.onstop = () => {
-                    const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
                     audioChunks = [];
                     sendAudioToServer(audioBlob);
                 };
                 mediaRecorder.start();
                 isRecording = true;
                 document.getElementById('recordBtn').textContent = 'Stop';
+                updateAudioStatus('Recording...');
             })
             .catch(error => {
-                console.error('Error accessing microphone:', error);
+                log('Error accessing microphone: ' + error.message, 'error');
+                updateAudioStatus('Error');
             });
     }
 
@@ -434,9 +563,11 @@
 
     function sendAudioToServer(audioBlob) {
         const formData = new FormData();
-        formData.append('audio', audioBlob);
+        // Create a new File with .webm extension to help server identify format
+        const audioFile = new File([audioBlob], 'recording.webm', { type: 'audio/webm' });
+        formData.append('audio', audioFile);
 
-        updateAudioStatus('Sending...');
+        updateAudioStatus('Transcribing...');
         fetch('/api/stt', {
             method: 'POST',
             body: formData
@@ -450,7 +581,7 @@
                     const message = {
                         type: 'text',
                         message: data.text,
-                        topic: 'USA elections 2024, Joe Biden vs Donald Trump'
+                        topic: 'The Nature of Consciousness and Reality'
                     };
                     ws.send(JSON.stringify(message));
                     addMessage(data.text, true);
@@ -475,7 +606,7 @@
         if (ws && ws.readyState === WebSocket.OPEN) {
             const data = {
                 message: message,
-                topic: 'USA elections 2024, Joe Biden vs Donald Trump',
+                topic: 'The Nature of Consciousness and Reality',
             };
 
             ws.send(JSON.stringify(data));
@@ -484,6 +615,26 @@
             }
             messageInput.value = '';
         }
+    }
+
+    function updateConvictionRates(data) {
+        // Update agent names
+        document.getElementById('agent1Name').textContent = data.agent1.name;
+        document.getElementById('agent2Name').textContent = data.agent2.name;
+
+        // Update agent 1 metrics
+        document.getElementById('agent1Confidence').style.width = `${data.agent1.confidence * 100}%`;
+        document.getElementById('agent1Consistency').style.width = `${data.agent1.consistency * 100}%`;
+        document.getElementById('agent1Persuasiveness').style.width = `${data.agent1.persuasiveness * 100}%`;
+        document.getElementById('agent1EmotionalImpact').style.width = `${data.agent1.emotional_impact * 100}%`;
+        document.getElementById('agent1Overall').style.width = `${data.agent1.overall * 100}%`;
+
+        // Update agent 2 metrics
+        document.getElementById('agent2Confidence').style.width = `${data.agent2.confidence * 100}%`;
+        document.getElementById('agent2Consistency').style.width = `${data.agent2.consistency * 100}%`;
+        document.getElementById('agent2Persuasiveness').style.width = `${data.agent2.persuasiveness * 100}%`;
+        document.getElementById('agent2EmotionalImpact').style.width = `${data.agent2.emotional_impact * 100}%`;
+        document.getElementById('agent2Overall').style.width = `${data.agent2.overall * 100}%`;
     }
 </script>
 </body>

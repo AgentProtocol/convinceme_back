@@ -1,7 +1,99 @@
 # ConvinceMe - AI Agent Conversation Platform
 
-## Overview
-ConvinceMe is a sophisticated Go-based platform that enables dynamic, real-time conversations between AI agents and human participants. The system features advanced natural language processing, speech synthesis, and interactive dialogue management, creating engaging and context-aware conversations.
+## Quick Start
+
+1. **Clone the repository**:
+   ```bash
+   git clone [repository-url]
+   cd convinceme_back
+   ```
+
+2. **Initialize the application**:
+   ```bash
+   # Initialize directories and generate certificates
+   convinceme init
+
+   # Create .env file with your API key
+   echo "OPENAI_API_KEY=your_key_here" > .env
+   ```
+
+3. **Start the server**:
+   ```bash
+   convinceme serve
+   ```
+
+4. **Access the interface**:
+   - Open `https://localhost:8080` in your browser
+   - Accept the self-signed certificate warning
+   - Start conversing with the AI agents
+
+## Command Line Interface
+
+ConvinceMe uses Cobra for its CLI. Here are the available commands:
+
+### Global Flags
+```bash
+--config, -c     Config file path (default: .env)
+--help, -h       Help for any command
+```
+
+### Initialize Application
+```bash
+convinceme init
+```
+Sets up required directories and generates TLS certificates.
+
+### Start Server
+```bash
+convinceme serve [flags]
+
+Flags:
+--port, -p       Port number (default: 8080)
+--cert           Certificate file path (default: cert.pem)
+--key            Key file path (default: key.pem)
+```
+
+### Examples
+```bash
+# Start server on custom port
+convinceme serve --port 3000
+
+# Use custom certificates
+convinceme serve --cert /custom/cert.pem --key /custom/key.pem
+
+# Use custom config file
+convinceme --config prod.env serve
+```
+
+## Development
+
+- **Hot reload mode**:
+  ```bash
+  make dev
+  ```
+  This uses Air for automatic rebuilding when files change.
+
+- **Clean up**:
+  ```bash
+  make clean
+  ```
+  Removes generated files and certificates.
+
+- **Run tests**:
+  ```bash
+  make test
+  ```
+
+## Available Make Commands
+
+- `make deps` - Install dependencies
+- `make cert` - Generate TLS certificates
+- `make build` - Build the project
+- `make run` - Run the server
+- `make test` - Run tests
+- `make clean` - Clean up generated files
+- `make dev` - Run in development mode with hot reload
+- `make all` - Complete setup and run (default)
 
 ## Features
 
@@ -31,57 +123,6 @@ ConvinceMe is a sophisticated Go-based platform that enables dynamic, real-time 
 - OpenAI Go Client
 - LangChain Go
 
-## Installation
-
-1. **Clone the Repository**:
-   ```bash
-   git clone [repository-url]
-   cd convinceme_back
-   ```
-
-2. **Install Dependencies**:
-   ```bash
-   go mod download
-   go mod tidy
-   ```
-
-3. **Configure Environment**:
-   Create a `.env` file in the project root:
-   ```env
-   OPENAI_API_KEY=your_openai_api_key
-   ```
-
-4. **Generate TLS Certificates**:
-   ```bash
-   openssl genpkey -algorithm RSA -out key.pem
-   openssl req -new -key key.pem -out cert.csr
-   openssl req -x509 -key key.pem -in cert.csr -out cert.pem -days 365
-   ```
-
-## Usage
-
-### Starting the Server
-1. Run the server:
-   ```bash
-   go run cmd/main.go
-   ```
-2. The server will start on the default port (check console output)
-
-### Accessing the Interface
-- Open `test.html` in your web browser
-- Allow microphone access for voice input (optional)
-- Start conversing with the AI agents
-
-### API Endpoints
-
-#### WebSocket
-- `/ws/conversation`: Main WebSocket endpoint for real-time communication
-
-#### HTTP
-- `/api/conversation/start`: Initialize a new conversation
-- `/api/audio/:id`: Stream synthesized audio responses
-- `/api/stt`: Speech-to-text processing endpoint
-
 ## Architecture
 
 ### Components
@@ -105,7 +146,9 @@ ConvinceMe is a sophisticated Go-based platform that enables dynamic, real-time 
 ```
 convinceme_back/
 ├── cmd/
-│   └── main.go           # Application entry point
+│   ├── root.go            # Root command
+│   ├── init.go            # Init command
+│   └── serve.go           # Serve command
 ├── internal/
 │   ├── agent/            # AI agent implementation
 │   ├── audio/            # Audio processing

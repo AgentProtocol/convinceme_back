@@ -34,6 +34,13 @@ func DefaultConfig() ConversationConfig {
 	}
 }
 
+// ConversationMessage represents a single message in the conversation
+type ConversationMessage struct {
+	Agent     interface{} // This should match your agent type
+	Content   string
+	Timestamp time.Time
+}
+
 // Conversation manages the dialogue between two agents
 type Conversation struct {
 	agent1       *agent.Agent
@@ -42,25 +49,35 @@ type Conversation struct {
 	inputHandler *player.InputHandler
 	isActive     bool
 	mu           sync.RWMutex
+	messages     []ConversationMessage // Update type
+	rag          *RAGIntegration
 }
 
 // NewConversation creates a new conversation between two agents
-func NewConversation(agent1, agent2 *agent.Agent, config ConversationConfig, inputHandler *player.InputHandler) *Conversation {
+func NewConversation(agent1, agent2 *agent.Agent, config ConversationConfig, inputHandler *player.InputHandler) (*Conversation, error) {
 	if !config.ResponseStyle.IsValid() {
 		config.ResponseStyle = types.ResponseStyleCasual // fallback to casual if invalid
 	}
+
+	rag, err := NewRAGIntegration()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create RAG integration: %v", err)
+	}
+
 	return &Conversation{
 		agent1:       agent1,
 		agent2:       agent2,
 		config:       config,
 		inputHandler: inputHandler,
-	}
+		rag:          rag,
+	}, nil
 }
 
 // Start begins the conversation between the agents
 func (c *Conversation) Start(ctx context.Context) error {
 	c.mu.Lock()
 	c.isActive = true
+	c.messages = make([]ConversationMessage, 0) // Initialize message history
 	c.mu.Unlock()
 
 	var lastMessage string
@@ -73,8 +90,17 @@ func (c *Conversation) Start(ctx context.Context) error {
 	fmt.Printf("Style: %s\n", c.config.ResponseStyle)
 	fmt.Printf("Between %s (Interviewer) and %s (Guest)\n\n", interviewer.GetName(), guest.GetName())
 
+	// Get historical context
+	historicalContext, err := c.rag.GenerateContextFromHistory(ctx, c.config.Topic, []string{interviewer.GetName(), guest.GetName()})
+	if err != nil {
+		log.Printf("Warning: Failed to get historical context: %v", err)
+	}
+
 	stylePrompt := c.getPromptStyle()
 	lastMessage = fmt.Sprintf("Let's start discussing about %s. %s", c.config.Topic, stylePrompt)
+	if historicalContext != "" {
+		lastMessage = fmt.Sprintf("%s\n\nFor context: %s", lastMessage, historicalContext)
+	}
 
 	// Create a channel for player interrupts
 	interruptCh := make(chan player.PlayerInput, 1)
@@ -100,6 +126,9 @@ func (c *Conversation) Start(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("failed to generate response: %v", err)
 		}
+
+		// Store the message in history
+		c.addMessage(currentAgent, response)
 
 		fmt.Printf("AGENT-%d: %s\n", getAgentNumber(currentAgent, interviewer), response)
 		lastMessage = response
@@ -130,6 +159,35 @@ func (c *Conversation) Start(ctx context.Context) error {
 	c.mu.Lock()
 	c.isActive = false
 	c.mu.Unlock()
+
+	// Analyze conviction rates at the end of conversation
+	analysis, err := c.AnalyzeConviction(ctx)
+	if err != nil {
+		log.Printf("Failed to analyze conviction: %v", err)
+	} else {
+		// Print detailed analysis
+		fmt.Printf("\nConviction Analysis Results:\n")
+		fmt.Printf("Topic: %s\n\n", analysis.Topic)
+
+		fmt.Printf("Interviewer (%s):\n", c.agent1.GetName())
+		fmt.Printf("- Confidence: %.2f\n", analysis.InterviewerMetrics.Confidence)
+		fmt.Printf("- Consistency: %.2f\n", analysis.InterviewerMetrics.Consistency)
+		fmt.Printf("- Persuasiveness: %.2f\n", analysis.InterviewerMetrics.Persuasiveness)
+		fmt.Printf("- Emotional Impact: %.2f\n", analysis.InterviewerMetrics.EmotionalImpact)
+		fmt.Printf("- Overall Conviction: %.2f\n\n", analysis.InterviewerMetrics.Overall)
+
+		fmt.Printf("Guest (%s):\n", c.agent2.GetName())
+		fmt.Printf("- Confidence: %.2f\n", analysis.GuestMetrics.Confidence)
+		fmt.Printf("- Consistency: %.2f\n", analysis.GuestMetrics.Consistency)
+		fmt.Printf("- Persuasiveness: %.2f\n", analysis.GuestMetrics.Persuasiveness)
+		fmt.Printf("- Emotional Impact: %.2f\n", analysis.GuestMetrics.EmotionalImpact)
+		fmt.Printf("- Overall Conviction: %.2f\n", analysis.GuestMetrics.Overall)
+
+		// Store conversation in RAG database
+		if err := c.rag.StoreConversation(ctx, c, analysis); err != nil {
+			log.Printf("Warning: Failed to store conversation in RAG database: %v", err)
+		}
+	}
 
 	return nil
 }
@@ -199,4 +257,29 @@ func getAgentNumber(current, agent1 *agent.Agent) int {
 		return 1
 	}
 	return 2
+}
+
+// getMessageHistory returns the conversation history
+func (c *Conversation) getMessageHistory() []ConversationMessage {
+	return c.messages
+}
+
+// addMessage adds a new message to the conversation history
+func (c *Conversation) addMessage(agent interface{}, content string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.messages = append(c.messages, ConversationMessage{
+		Agent:     agent,
+		Content:   content,
+		Timestamp: time.Now(),
+	})
+}
+
+// Close cleans up resources used by the conversation
+func (c *Conversation) Close() error {
+	if c.rag != nil {
+		return c.rag.Close()
+	}
+	return nil
 }
