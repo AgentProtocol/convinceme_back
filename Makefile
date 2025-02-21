@@ -23,6 +23,7 @@ cert:
 build:
 	@echo "Building project..."
 	go build -o bin/convinceme main.go
+	./bin/convinceme init
 
 # Run the project
 run:
@@ -31,7 +32,7 @@ run:
 		echo "Warning: .env file not found. Make sure to create it with your OPENAI_API_KEY"; \
 	fi
 	@mkdir -p data
-	./bin/convinceme
+	./bin/convinceme serve
 
 # Run tests
 test:
