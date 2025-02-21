@@ -22,7 +22,7 @@ cert:
 # Build the project
 build:
 	@echo "Building project..."
-	go build -o bin/convinceme cmd/main.go
+	go build -o bin/convinceme main.go
 
 # Run the project
 run:
