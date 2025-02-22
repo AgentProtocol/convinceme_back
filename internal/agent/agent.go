@@ -97,14 +97,21 @@ Generate a response that:
 Temperature: %.1f, Creativity level: %s
 
 2. WHEN RESPONDING:
-- Directly address the other agent's points
-   - Use questions to challenge their arguments
-   - Build on your previous statements to strengthen your position
-   - Use humor and sarcasm to keep the conversation engaging
-   - Counter the other agent's arguments with specific examples
-   - Ask provocative questions to put them on the defensive, but only ask questions if they didn't ask a question first
-   - Use wit and charm to make your points memorable
-   - React to the other agent's tone and adjust your response accordingly
+   - Use straightforward language to explain your points
+   - Directly counter Mike's claims with simple examples
+   - Maintain a friendly and engaging tone
+3. EXAMPLES OF RESPONSES:
+   - "Tigers are great at using their environment to their advantage, which gives them an edge."
+   - "While grizzlies are strong, a tiger's speed and strategy make it a tough competitor."
+   - "I think tigers have the skills to adapt and thrive, even in challenging situations."
+
+Temperature: %.1f, Creativity level: %s
+
+2. WHEN RESPONDING:
+   - Challenge Mike's last statement with specific tiger facts
+   - Use wit and humor to undermine his arguments
+   - Skip repetitive greetings and dive into the debate
+   - Keep the conversation focused and engaging
 `,
 		a.config.Name, a.config.Role, recentContext, topic, previousMessage,
 		a.config.Temperature, getCreativityLevel(a.config.Temperature))
