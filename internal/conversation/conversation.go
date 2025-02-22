@@ -76,26 +76,7 @@ func (c *Conversation) Start(ctx context.Context) error {
 	stylePrompt := c.getPromptStyle()
 	lastMessage = fmt.Sprintf("Let's start discussing about %s. %s", c.config.Topic, stylePrompt)
 
-	// Create a channel for player interrupts
-	interruptCh := make(chan player.PlayerInput, 1)
-	c.inputHandler.RegisterProcessor(&playerInputProcessor{
-		conversation: c,
-		interruptCh:  interruptCh,
-	})
-
 	for turn := 0; turn < c.config.MaxTurns; turn++ {
-		// Check for player input before generating response
-		select {
-		case input := <-interruptCh:
-			// Handle player interruption
-			if err := c.handlePlayerInterrupt(ctx, input, currentAgent); err != nil {
-				log.Printf("Error handling player interrupt: %v", err)
-			}
-			continue
-		default:
-			// No interruption, proceed with normal flow
-		}
-
 		response, err := currentAgent.GenerateResponse(ctx, c.config.Topic, lastMessage)
 		if err != nil {
 			return fmt.Errorf("failed to generate response: %v", err)
@@ -117,14 +98,8 @@ func (c *Conversation) Start(ctx context.Context) error {
 		// Switch agents for the next turn
 		currentAgent, otherAgent = otherAgent, currentAgent
 
-		// Wait before next turn, but allow for interruption
-		select {
-		case <-time.After(c.config.TurnDelay):
-		case input := <-interruptCh:
-			if err := c.handlePlayerInterrupt(ctx, input, currentAgent); err != nil {
-				log.Printf("Error handling player interrupt: %v", err)
-			}
-		}
+		// Wait before next turn
+		time.Sleep(c.config.TurnDelay)
 	}
 
 	c.mu.Lock()

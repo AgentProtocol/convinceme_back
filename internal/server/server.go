@@ -174,27 +174,8 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 	// Set read deadline for initial connection
 	ws.SetReadDeadline(time.Now().Add(time.Second * 60))
 
-	// Create a done channel to signal goroutine cleanup
-	done := make(chan struct{})
-	defer close(done)
-
-	// Start ping handler
-	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-done:
-				return
-			case <-ticker.C:
-				if err := ws.WriteJSON(gin.H{"type": "ping"}); err != nil {
-					log.Printf("Failed to send ping: %v", err)
-					return
-				}
-			}
-		}
-	}()
+	// Start the conversation automatically
+	go s.continueAgentDiscussion(ws)
 
 	// Handle incoming messages
 	for {
@@ -210,22 +191,8 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 		// Reset read deadline after each successful message
 		ws.SetReadDeadline(time.Now().Add(time.Second * 60))
 
-		// Handle ping messages
-		if msg.Type == "ping" {
-			if err := ws.WriteJSON(gin.H{"type": "pong"}); err != nil {
-				log.Printf("Failed to send pong: %v", err)
-				return
-			}
-			continue
-		}
-
-		s.playerMessageMutex.Lock()
-		s.lastPlayerMessage = time.Now()
-		s.playerMessageMutex.Unlock()
-
-		if msg.Message == "" {
-			s.continueAgentDiscussion(ws)
-		} else {
+		// Handle player messages if any
+		if msg.Message != "" {
 			s.handlePlayerMessage(ws, msg)
 		}
 	}
