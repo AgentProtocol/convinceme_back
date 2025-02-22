@@ -122,7 +122,7 @@ func (s *Server) getConversationContext() string {
 	for _, entry := range s.conversationLog[startIdx:] {
 		speakerType := "Agent"
 		if entry.IsPlayer {
-			speakerType = "Player"
+			speakerType = "" //! ANDY: keep this empty, I don't want it to call the user player all the time
 		}
 		context += fmt.Sprintf("%s (%s): %s\n", entry.Speaker, speakerType, entry.Message)
 	}

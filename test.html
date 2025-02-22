@@ -450,7 +450,7 @@
                     const message = {
                         type: 'text',
                         message: data.text,
-                        topic: 'USA elections 2024, Joe Biden vs Donald Trump'
+                        topic: 'Tiger vs Grizzly Bear - who would win?'
                     };
                     ws.send(JSON.stringify(message));
                     addMessage(data.text, true);
@@ -475,7 +475,7 @@
         if (ws && ws.readyState === WebSocket.OPEN) {
             const data = {
                 message: message,
-                topic: 'USA elections 2024, Joe Biden vs Donald Trump',
+                topic: 'Tiger vs Grizzly Bear - who would win?',
             };
 
             ws.send(JSON.stringify(data));

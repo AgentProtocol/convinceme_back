@@ -14,12 +14,16 @@ import (
 
 // AgentConfig holds configuration for an agent
 type AgentConfig struct {
-	Name        string
-	Role        string
-	Voice       types.Voice
-	Temperature float32
-	MaxTokens   int
-	TopP        float32
+	Name            string
+	Role            string
+	SystemPrompt    string
+	DebatePosition  string
+	ExpertiseArea   string
+	KeyArguments    []string
+	Voice           types.Voice
+	Temperature     float32
+	MaxTokens       int
+	TopP            float32
 }
 
 // MemoryEntry represents a single memory entry with context
@@ -51,7 +55,7 @@ func NewAgent(apiKey string, config AgentConfig) (*Agent, error) {
 	// Configure OpenAI client options
 	opts := []openai.Option{
 		openai.WithToken(apiKey),
-		openai.WithModel("gpt-3.5-turbo"),
+		openai.WithModel("gpt-4-turbo"),
 	}
 
 	// Create LLM client with configuration
@@ -90,7 +94,18 @@ Generate a response that:
 4. Shows appropriate emotional response
 5. Stays relevant to the topic while allowing for natural topic transitions
 
-Temperature: %.1f, Creativity level: %s`,
+Temperature: %.1f, Creativity level: %s
+
+2. WHEN RESPONDING:
+- Directly address the other agent's points
+   - Use questions to challenge their arguments
+   - Build on your previous statements to strengthen your position
+   - Use humor and sarcasm to keep the conversation engaging
+   - Counter the other agent's arguments with specific examples
+   - Ask provocative questions to put them on the defensive, but only ask questions if they didn't ask a question first
+   - Use wit and charm to make your points memorable
+   - React to the other agent's tone and adjust your response accordingly
+`,
 		a.config.Name, a.config.Role, recentContext, topic, previousMessage,
 		a.config.Temperature, getCreativityLevel(a.config.Temperature))
 
