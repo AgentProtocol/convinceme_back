@@ -2,8 +2,10 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"github.com/neo/convinceme_backend/internal/audio"
@@ -200,4 +202,19 @@ func (a *Agent) GenerateAndStreamAudio(ctx context.Context, text string) ([]byte
 	log.Printf("Generated audio for %s: %d bytes", a.config.Name, len(audioData))
 
 	return audioData, nil
+}
+
+// LoadAgentConfig loads an agent configuration from a JSON file
+func LoadAgentConfig(configPath string) (AgentConfig, error) {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return AgentConfig{}, err
+	}
+
+	var config AgentConfig
+	if err := json.Unmarshal(data, &config); err != nil {
+		return AgentConfig{}, err
+	}
+
+	return config, nil
 }
