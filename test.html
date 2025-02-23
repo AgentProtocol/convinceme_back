@@ -397,13 +397,7 @@
         }
 
         if (data.type === 'conviction' && data.message) {
-            // Extract just the scores and dominant speaker from the analysis
-            const lines = data.message.split('\n');
-            const relevantInfo = lines
-                .filter(line => line.includes('Conviction:') || line.includes('Dominant Speaker:'))
-                .map(line => line.trim())
-                .join('\n');
-            log(relevantInfo, 'conviction');
+            log(data.message, 'conviction');
             return;
         }
 

@@ -599,7 +599,7 @@ func (s *Server) analyzeConviction(ctx context.Context, ws *websocket.Conn) {
 	if ws != nil {
 		if err := ws.WriteJSON(gin.H{
 			"type":    "conviction",
-			"message": analysisText,
+			"message": metricsJSON,
 		}); err != nil {
 			log.Printf("Failed to send conviction analysis: %v", err)
 		}
