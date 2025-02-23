@@ -24,7 +24,7 @@ type AgentConfig struct {
 	KeyArguments    []string
 	Voice           types.Voice
 	Temperature     float32
-	MaxTokens       int
+	MaxCompletionTokens int
 	TopP            float32
 }
 
@@ -57,7 +57,7 @@ func NewAgent(apiKey string, config AgentConfig) (*Agent, error) {
 	// Configure OpenAI client options
 	opts := []openai.Option{
 		openai.WithToken(apiKey),
-		openai.WithModel("gpt-4-turbo-preview"),
+		openai.WithModel("o1-mini"),
 	}
 
 	// Create LLM client with configuration

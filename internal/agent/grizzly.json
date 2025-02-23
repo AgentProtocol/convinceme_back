@@ -13,6 +13,6 @@
     ],
     "voice": "fable",
     "temperature": 0.8,
-    "maxTokens": 150,
+    "MaxCompletionTokens": 150,
     "topP": 0.95
 }

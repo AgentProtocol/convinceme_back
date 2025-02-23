@@ -72,7 +72,7 @@ The debate should focus on factual evidence while acknowledging the passion each
 		MaxTurns:        10, // Increased turns for more detailed debate
 		TurnDelay:       500 * time.Millisecond,
 		ResponseStyle:   types.ResponseStyleDebate, // Changed to debate style
-		MaxTokens:       150,                       // Increased tokens for more detailed responses
+		MaxCompletionTokens:       150,                       // Increased tokens for more detailed responses
 		TemperatureHigh: true,
 	}
 
