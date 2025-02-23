@@ -295,11 +295,20 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 		response string
 		order    int
 	}
+	var agent1Name, agent2Name string
+    for name := range s.agents {
+        if agent1Name == "" {
+            agent1Name = name
+        } else {
+            agent2Name = name
+            break
+        }
+    }
 
 	// Score the user's message first
 	if s.scorer != nil {
 		log.Printf("\n=== Scoring User Message ===\n")
-		score, err := s.scorer.ScoreArgument(ctx, msg.Message, msg.Topic)
+		score, err := s.scorer.ScoreArgument(ctx, msg.Message, msg.Topic, agent1Name, agent2Name)
 		if err != nil {
 			log.Printf("Failed to score user message: %v", err)
 		} else {
@@ -313,12 +322,18 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
                     "Truth: %d/100\n"+
                     "Humor: %d/100\n"+
                     "Average: %.1f/100\n",
+					"Agent1_support: %d/100\n",
+					"Agent2_support: %d/100\n",
+					"Explanation: %s\n",
                     score.Strength,
                     score.Relevance,
                     score.Logic,
                     score.Truth,
                     score.Humor,
-                    score.Average),
+                    score.Average,
+					score.Agent1_support,
+					score.Agent2_support,
+					score.Explanation),
 			}); 
 			err != nil {
 				log.Printf("Failed to send score to user: %v", err)
