@@ -178,6 +178,19 @@
             background-color: #e8f5e9;
             color: #2e7d32;
         }
+
+        .message-score {
+            font-size: 0.8em;
+            color: #666;
+            margin-top: 5px;
+            text-align: right;
+            font-style: italic;
+        }
+
+        .message.user .message-score {
+            color: #fff;
+            opacity: 0.8;
+        }
     </style>
 </head>
 
@@ -218,6 +231,7 @@
         let mediaRecorder;
         let audioChunks = [];
         let isRecording = false;
+        let currentMessageScore = null;
 
         function updateAudioStatus(status) {
             document.getElementById('audioStatus').textContent = status;
@@ -247,9 +261,20 @@
                 messageDiv.appendChild(nameSpan);
             }
 
-            const messageContent = document.createElement('span');
+            const messageContent = document.createElement('div');
+            messageContent.className = 'message-content';
             messageContent.textContent = message;
             messageDiv.appendChild(messageContent);
+
+            // Add score display for user messages
+            if (isUser && currentMessageScore !== null) {
+                const scoreSpan = document.createElement('div');
+                scoreSpan.className = 'message-score';
+                scoreSpan.textContent = `Argument Score: ${currentMessageScore.toFixed(1)}/100`;
+                messageDiv.appendChild(scoreSpan);
+                // Reset the score after using it
+                currentMessageScore = null;
+            }
 
             chatMessages.appendChild(messageDiv);
             chatMessages.scrollTop = chatMessages.scrollHeight;
@@ -391,17 +416,25 @@
                 return;
             }
 
-            if (data.type === 'conviction' && data.message) {
-                // Convert newlines to <br> tags for HTML rendering
-                const formattedMessage = data.message.replace(/\n/g, '<br>');
-                log(formattedMessage, 'conviction');
+            if (data.type === 'score' && data.message) {
+                // Extract average score using regex
+                const avgMatch = data.message.match(/Average:\s*([\d.]+)/);
+                if (avgMatch) {
+                    currentMessageScore = parseFloat(avgMatch[1]);
+                    // Now that we have the score, add the user's message
+                    if (window.lastUserMessage) {
+                        addMessage(window.lastUserMessage, true);
+                        window.lastUserMessage = null;
+                    }
+                }
+                const formattedScore = data.message.replace(/\n/g, '<br>');
+                log(formattedScore, 'score');
                 return;
             }
 
-            // Handle scoring messages with proper line breaks
-            if (data.type === 'score' && data.message) {
-                const formattedScore = data.message.replace(/\n/g, '<br>');
-                log(formattedScore, 'score');
+            if (data.type === 'conviction' && data.message) {
+                const formattedMessage = data.message.replace(/\n/g, '<br>');
+                log(formattedMessage, 'conviction');
                 return;
             }
 
@@ -520,7 +553,9 @@
 
                 ws.send(JSON.stringify(data));
                 if (message) {
-                    addMessage(message, true);
+                    // Store the message temporarily until we get the score
+                    window.lastUserMessage = message;
+                    // Don't add the message yet - wait for the score
                 }
                 messageInput.value = '';
             }
