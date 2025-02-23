@@ -51,7 +51,7 @@ func NewAgent(apiKey string, config AgentConfig) (*Agent, error) {
 	// Configure OpenAI client options
 	opts := []openai.Option{
 		openai.WithToken(apiKey),
-		openai.WithModel("gpt-3.5-turbo"),
+		openai.WithModel("gpt-4-turbo-preview"),
 	}
 
 	// Create LLM client with configuration
@@ -135,7 +135,7 @@ func (a *Agent) buildContextFromMemory(n int) string {
 
 	var context string
 	for _, entry := range a.memory[start:] {
-		context += fmt.Sprintf("- %s (Emotion: %s, Topics: %v)\n", 
+		context += fmt.Sprintf("- %s (Emotion: %s, Topics: %v)\n",
 			entry.Message, entry.Context.Emotion, entry.Context.Topics)
 	}
 

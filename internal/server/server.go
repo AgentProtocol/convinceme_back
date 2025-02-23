@@ -3,18 +3,21 @@ package server
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/neo/convinceme_backend/internal/audio"
-	"github.com/quic-go/quic-go/http3"
 	"log"
 	"net/http"
 	"sync"
 	"time"
 
+	"github.com/neo/convinceme_backend/internal/audio"
+	"github.com/quic-go/quic-go/http3"
+
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/neo/convinceme_backend/internal/agent"
+	"github.com/neo/convinceme_backend/internal/tools"
 )
 
 type Server struct {
@@ -29,6 +32,7 @@ type Server struct {
 	agentMutex         sync.RWMutex
 	conversationLog    []ConversationEntry
 	conversationMutex  sync.RWMutex
+	judge              *tools.ConvictionJudge
 }
 
 type ConversationEntry struct {
@@ -56,7 +60,12 @@ var upgrader = websocket.Upgrader{
 	EnableCompression: true,
 }
 
-func NewServer(agents map[string]*agent.Agent) *Server {
+func NewServer(agents map[string]*agent.Agent, apiKey string) *Server {
+	judge, err := tools.NewConvictionJudge(apiKey)
+	if err != nil {
+		log.Printf("Warning: Failed to create conviction judge: %v", err)
+	}
+
 	router := gin.Default()
 
 	router.Use(func(c *gin.Context) {
@@ -82,6 +91,7 @@ func NewServer(agents map[string]*agent.Agent) *Server {
 		audioCache:        make(map[string]audioCache),
 		lastPlayerMessage: time.Now(),
 		conversationLog:   make([]ConversationEntry, 0),
+		judge:             judge,
 	}
 
 	router.GET("/ws/conversation", server.handleConversationWebSocket)
@@ -275,21 +285,23 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 		go func(agentName string, agent *agent.Agent) {
 			defer wg.Done()
 
-			prompt := fmt.Sprintf(`Current conversation context:
+			prompt := fmt.Sprintf(`You are participating in a structured debate about whether bears or tigers are the superior predator.
+
+Current conversation context:
 %s
 
-A player has just said: "%s"
-
 You are %s, with the role of %s.
-Generate a response that:
-1. Shows you understand the full conversation context
-2. Acknowledges the player's message
-3. Stays in character
-4. Maintains natural conversation flow
-5. Is brief but engaging
-6. Interacts with the other agent's previous messages when relevant`,
+Remember:
+1. Stay strictly focused on the bear vs tiger debate
+2. Use your expertise to support your position
+3. Reference specific facts and studies about your species
+4. Address any points about the opposing predator with scientific counter-arguments
+5. Never deviate from the debate topic
+6. Be passionate but factual about your position
+7. Do not repeat or acknowledge the player's message directly - just continue the debate naturally
+
+Generate a response that maintains the debate focus and supports your position.`,
 				conversationContext,
-				msg.Message,
 				agent.GetName(),
 				agent.GetRole())
 
@@ -350,6 +362,9 @@ Generate a response that:
 		// Add delay between agent responses
 		time.Sleep(2 * time.Second)
 	}
+
+	// After processing the message and getting agent response
+	s.analyzeConviction(context.Background(), ws)
 }
 
 func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
@@ -364,21 +379,35 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 	}
 
 	ctx := context.Background()
-	prompt := fmt.Sprintf(`Current conversation context:
+	prompt := fmt.Sprintf(`You are participating in a structured debate about whether bears or tigers are the superior predator.
+
+Current conversation context:
 %s
 
 You are %s, with the role of %s.
-Generate a response that:
-1. Shows you understand the full conversation context
-2. Stays in character
-3. Maintains natural conversation flow
-4. Is brief but engaging
-5. Builds on previous messages when relevant`,
+
+Your task is to:
+1. Continue the debate about bears vs tigers as superior predators
+2. Use your expertise to present new arguments or expand on previous points
+3. Reference specific facts, studies, or observations about your species
+4. Challenge or address points made about the opposing predator
+5. Stay strictly focused on the debate topic
+6. Be passionate but factual in your arguments
+
+Key debate points to consider:
+- Physical strength and combat abilities
+- Hunting success rates and techniques
+- Territorial dominance
+- Survival skills and adaptability
+- Historical encounters and documented fights
+- Biological advantages and disadvantages
+
+Generate a response that advances the debate while maintaining scientific credibility.`,
 		conversationContext,
 		agent.GetName(),
 		agent.GetRole())
 
-	response, err := agent.GenerateResponse(ctx, "General Discussion", prompt)
+	response, err := agent.GenerateResponse(ctx, "Bear vs Tiger Debate", prompt)
 	if err != nil {
 		log.Printf("Failed to generate response: %v", err)
 		return
@@ -419,6 +448,9 @@ Generate a response that:
 	}); err != nil {
 		log.Printf("Failed to send audio URL: %v", err)
 	}
+
+	// After each agent response
+	s.analyzeConviction(context.Background(), ws)
 }
 
 func (s *Server) startConversation(c *gin.Context) {
@@ -472,4 +504,89 @@ func (s *Server) Run(addr string) error {
 
 	// Start the HTTP/1.1 and HTTP/2 server
 	return srv.ListenAndServeTLS("cert.pem", "key.pem")
+}
+
+func (s *Server) analyzeConviction(ctx context.Context, ws *websocket.Conn) {
+	if s.judge == nil {
+		return
+	}
+
+	s.conversationMutex.RLock()
+	if len(s.conversationLog) < 2 {
+		s.conversationMutex.RUnlock()
+		return
+	}
+
+	// Convert server conversation log to judge's format
+	judgeConversation := make([]tools.ConversationEntry, 0, len(s.conversationLog))
+	for _, entry := range s.conversationLog {
+		if !entry.IsPlayer { // Only include agent messages
+			judgeConversation = append(judgeConversation, tools.ConversationEntry{
+				Speaker: entry.Speaker,
+				Message: entry.Message,
+			})
+		}
+	}
+
+	// Get agent names
+	var agent1Name, agent2Name string
+	for name := range s.agents {
+		if agent1Name == "" {
+			agent1Name = name
+		} else {
+			agent2Name = name
+			break
+		}
+	}
+	s.conversationMutex.RUnlock()
+
+	conversationData := map[string]interface{}{
+		"agent1_name":  agent1Name,
+		"agent2_name":  agent2Name,
+		"conversation": judgeConversation,
+	}
+
+	conversationJSON, err := json.Marshal(conversationData)
+	if err != nil {
+		log.Printf("Warning: Failed to marshal conversation data: %v", err)
+		return
+	}
+
+	metricsJSON, err := s.judge.Call(ctx, string(conversationJSON))
+	if err != nil {
+		log.Printf("Warning: Failed to analyze conviction: %v", err)
+		return
+	}
+
+	var metrics tools.ConvictionMetrics
+	if err := json.Unmarshal([]byte(metricsJSON), &metrics); err != nil {
+		log.Printf("Warning: Failed to parse conviction metrics: %v", err)
+		return
+	}
+
+	analysisText := fmt.Sprintf("\n=== Conviction Analysis ===\n"+
+		"%s Conviction: %.2f\n"+
+		"%s Conviction: %.2f\n"+
+		"Overall Tension: %.2f\n"+
+		"Dominant Speaker: %s\n"+
+		"Analysis: %s\n"+
+		"========================\n",
+		agent1Name, metrics.Agent1Score,
+		agent2Name, metrics.Agent2Score,
+		metrics.OverallTension,
+		metrics.DominantAgent,
+		metrics.AnalysisSummary)
+
+	// Log to server console
+	log.Print(analysisText)
+
+	// Send to frontend through WebSocket
+	if ws != nil {
+		if err := ws.WriteJSON(gin.H{
+			"type":    "conviction",
+			"message": analysisText,
+		}); err != nil {
+			log.Printf("Failed to send conviction analysis: %v", err)
+		}
+	}
 }

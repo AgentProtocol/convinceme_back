@@ -2,6 +2,7 @@ package conversation
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/neo/convinceme_backend/internal/agent"
 	"github.com/neo/convinceme_backend/internal/player"
+	"github.com/neo/convinceme_backend/internal/tools"
 	"github.com/neo/convinceme_backend/internal/types"
 )
 
@@ -34,26 +36,42 @@ func DefaultConfig() ConversationConfig {
 	}
 }
 
+// ConversationEntry represents a single message in the conversation
+type ConversationEntry struct {
+	Speaker string `json:"speaker"`
+	Message string `json:"message"`
+}
+
 // Conversation manages the dialogue between two agents
 type Conversation struct {
 	agent1       *agent.Agent
 	agent2       *agent.Agent
 	config       ConversationConfig
 	inputHandler *player.InputHandler
+	judge        *tools.ConvictionJudge
 	isActive     bool
 	mu           sync.RWMutex
+	history      []ConversationEntry
 }
 
 // NewConversation creates a new conversation between two agents
-func NewConversation(agent1, agent2 *agent.Agent, config ConversationConfig, inputHandler *player.InputHandler) *Conversation {
+func NewConversation(agent1, agent2 *agent.Agent, config ConversationConfig, inputHandler *player.InputHandler, apiKey string) *Conversation {
 	if !config.ResponseStyle.IsValid() {
 		config.ResponseStyle = types.ResponseStyleCasual // fallback to casual if invalid
 	}
+
+	judge, err := tools.NewConvictionJudge(apiKey)
+	if err != nil {
+		log.Printf("Warning: Failed to create conviction judge: %v", err)
+	}
+
 	return &Conversation{
 		agent1:       agent1,
 		agent2:       agent2,
 		config:       config,
 		inputHandler: inputHandler,
+		judge:        judge,
+		history:      make([]ConversationEntry, 0),
 	}
 }
 
@@ -101,6 +119,12 @@ func (c *Conversation) Start(ctx context.Context) error {
 			return fmt.Errorf("failed to generate response: %v", err)
 		}
 
+		// Add response to conversation history
+		c.history = append(c.history, ConversationEntry{
+			Speaker: currentAgent.GetName(),
+			Message: response,
+		})
+
 		fmt.Printf("AGENT-%d: %s\n", getAgentNumber(currentAgent, interviewer), response)
 		lastMessage = response
 
@@ -113,6 +137,13 @@ func (c *Conversation) Start(ctx context.Context) error {
 		// Log the generated response and audio
 		log.Printf("Generated response by %s: %s", currentAgent.GetName(), response)
 		log.Printf("Generated audio for %s: %d bytes", currentAgent.GetName(), len(audioData))
+
+		// Analyze conviction levels at the end of each round
+		if c.judge != nil && len(c.history) > 1 {
+			if err := c.analyzeConviction(ctx); err != nil {
+				log.Printf("Warning: Failed to analyze conviction levels: %v", err)
+			}
+		}
 
 		// Switch agents for the next turn
 		currentAgent, otherAgent = otherAgent, currentAgent
@@ -130,6 +161,47 @@ func (c *Conversation) Start(ctx context.Context) error {
 	c.mu.Lock()
 	c.isActive = false
 	c.mu.Unlock()
+
+	return nil
+}
+
+// analyzeConviction uses the ConvictionJudge to analyze the current conversation
+func (c *Conversation) analyzeConviction(ctx context.Context) error {
+	conversationData := map[string]interface{}{
+		"agent1_name":  c.agent1.GetName(),
+		"agent2_name":  c.agent2.GetName(),
+		"conversation": c.history,
+	}
+
+	conversationJSON, err := json.Marshal(conversationData)
+	if err != nil {
+		return fmt.Errorf("failed to marshal conversation data: %v", err)
+	}
+
+	// Get raw JSON response from the judge
+	metricsJSON, err := c.judge.Call(ctx, string(conversationJSON))
+	if err != nil {
+		return fmt.Errorf("failed to analyze conviction: %v", err)
+	}
+
+	// Parse the JSON response into metrics
+	var metrics tools.ConvictionMetrics
+	if err := json.Unmarshal([]byte(metricsJSON), &metrics); err != nil {
+		return fmt.Errorf("failed to parse conviction metrics: %v", err)
+	}
+
+	log.Printf("\n=== Conviction Analysis ===\n"+
+		"%s Conviction: %.2f\n"+
+		"%s Conviction: %.2f\n"+
+		"Overall Tension: %.2f\n"+
+		"Dominant Speaker: %s\n"+
+		"Analysis: %s\n"+
+		"========================\n",
+		c.agent1.GetName(), metrics.Agent1Score,
+		c.agent2.GetName(), metrics.Agent2Score,
+		metrics.OverallTension,
+		metrics.DominantAgent,
+		metrics.AnalysisSummary)
 
 	return nil
 }

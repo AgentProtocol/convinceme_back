@@ -30,20 +30,20 @@ func main() {
 
 	// Create agent configurations
 	agent1Config := agent.AgentConfig{
-		Name:        "Billionaire, CEO of SpaceX and Tesla, fanatic Trump supporter",
-		Role:        "Billionaire, CEO of SpaceX and Tesla, fanatic Trump supporter",
+		Name:        "Bear Expert",
+		Role:        "Wildlife biologist specializing in bears, passionate advocate for bears' superiority. Expert in ursine behavior, physiology, and hunting patterns. Has spent 15 years studying bears in their natural habitat and strongly believes they are the ultimate apex predators.",
 		Voice:       types.VoiceFable,
 		Temperature: 1.5, // Higher temperature for more emotional responses
-		MaxTokens:   50,
+		MaxTokens:   150,
 		TopP:        0.9,
 	}
 
 	agent2Config := agent.AgentConfig{
-		Name:        "Joe Rogan",
-		Role:        "Interviewer, host of The Joe Rogan Experience podcast, UFC commentator",
+		Name:        "Tiger Specialist",
+		Role:        "Big cat researcher and tiger conservation expert. Has studied tigers across Asia for 20 years, documenting their hunting techniques and physical capabilities. Firmly believes tigers are nature's perfect predators.",
 		Voice:       types.VoiceOnyx,
 		Temperature: 1.5, // Higher temperature for more emotional responses
-		MaxTokens:   50,
+		MaxTokens:   150,
 		TopP:        0.9,
 	}
 
@@ -61,21 +61,31 @@ func main() {
 	// Create input handler
 	inputHandler := player.NewInputHandler(logger)
 
-	// Define a common topic for the conversation
-	commonTopic := "Political landscape in the United States"
+	// Define the debate topic with explicit initial context
+	commonTopic := `Bear vs Tiger: Who is the superior predator?
+
+Key points to debate:
+- Physical strength and combat abilities
+- Hunting success rates and techniques
+- Territorial dominance
+- Survival skills and adaptability
+- Historical encounters and documented fights
+- Biological advantages and disadvantages
+
+The debate should focus on factual evidence while acknowledging the passion each expert has for their respective species.`
 
 	// Create conversation configuration with the common topic
 	convConfig := conversation.ConversationConfig{
 		Topic:           commonTopic,
-		MaxTurns:        5,
+		MaxTurns:        10, // Increased turns for more detailed debate
 		TurnDelay:       500 * time.Millisecond,
-		ResponseStyle:   types.ResponseStyleHumorous,
-		MaxTokens:       100,
+		ResponseStyle:   types.ResponseStyleDebate, // Changed to debate style
+		MaxTokens:       150,                       // Increased tokens for more detailed responses
 		TemperatureHigh: true,
 	}
 
 	// Create a new conversation with the common topic
-	conv := conversation.NewConversation(agent1, agent2, convConfig, inputHandler)
+	conv := conversation.NewConversation(agent1, agent2, convConfig, inputHandler, apiKey)
 
 	// Create agents map
 	agents := map[string]*agent.Agent{
@@ -84,7 +94,7 @@ func main() {
 	}
 
 	// Create and start the server
-	srv := server.NewServer(agents)
+	srv := server.NewServer(agents, apiKey)
 	logger.Println("Starting HTTPS server with HTTP/3 support on :8080...")
 	if err := srv.Run(":8080"); err != nil {
 		logger.Fatalf("Server failed: %v", err)

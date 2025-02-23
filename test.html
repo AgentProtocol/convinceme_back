@@ -150,6 +150,26 @@
             background-color: #e8f5e9;
         }
 
+        .log-entry.conviction {
+            border-left-color: #9c27b0;
+            background-color: #f3e5f5;
+            font-family: monospace;
+            white-space: pre;
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 4px;
+        }
+
+        .log-entry.conviction .metric {
+            color: #6a1b9a;
+            font-weight: bold;
+        }
+
+        .log-entry.conviction .score {
+            color: #4a148c;
+            font-weight: bold;
+        }
+
         #audioStatus {
             padding: 4px 8px;
             border-radius: 4px;
@@ -203,8 +223,19 @@
     function log(message, type = 'system') {
         const logMessages = document.getElementById('logMessages');
         const logEntry = document.createElement('div');
+        
+        // Check if this is a conviction analysis log
+        if (message.includes('=== Conviction Analysis ===')) {
+            type = 'conviction';
+            // Format the conviction analysis log
+            message = message.replace(/([\d.]+)/g, '<span class="score">$1</span>')
+                           .replace(/(Conviction:|Overall Tension:|Dominant Speaker:|Analysis:)/g, '<span class="metric">$1</span>');
+            logEntry.innerHTML = message;
+        } else {
+            logEntry.textContent = message;
+        }
+        
         logEntry.className = `log-entry ${type}`;
-        logEntry.textContent = message;
         logMessages.appendChild(logEntry);
         logMessages.scrollTop = logMessages.scrollHeight;
     }
@@ -365,6 +396,17 @@
             return;
         }
 
+        if (data.type === 'conviction' && data.message) {
+            // Extract just the scores and dominant speaker from the analysis
+            const lines = data.message.split('\n');
+            const relevantInfo = lines
+                .filter(line => line.includes('Conviction:') || line.includes('Dominant Speaker:'))
+                .map(line => line.trim())
+                .join('\n');
+            log(relevantInfo, 'conviction');
+            return;
+        }
+
         if (data.message) {
             addMessage(data.message, false, data.agent);
         }
@@ -450,7 +492,7 @@
                     const message = {
                         type: 'text',
                         message: data.text,
-                        topic: 'USA elections 2024, Joe Biden vs Donald Trump'
+                        topic: 'Bear vs Tiger: Who is the superior predator?'
                     };
                     ws.send(JSON.stringify(message));
                     addMessage(data.text, true);
@@ -475,7 +517,7 @@
         if (ws && ws.readyState === WebSocket.OPEN) {
             const data = {
                 message: message,
-                topic: 'USA elections 2024, Joe Biden vs Donald Trump',
+                topic: 'Bear vs Tiger: Who is the superior predator?',
             };
 
             ws.send(JSON.stringify(data));
