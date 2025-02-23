@@ -28,23 +28,15 @@ func main() {
 		logger.Fatalf("OPENAI_API_KEY is not set in the environment variables")
 	}
 
-	// Create agent configurations
-	agent1Config := agent.AgentConfig{
-		Name:        "Bear Expert",
-		Role:        "Wildlife biologist specializing in bears, passionate advocate for bears' superiority. Expert in ursine behavior, physiology, and hunting patterns. Has spent 15 years studying bears in their natural habitat and strongly believes they are the ultimate apex predators.",
-		Voice:       types.VoiceFable,
-		Temperature: 1.5, // Higher temperature for more emotional responses
-		MaxTokens:   150,
-		TopP:        0.9,
+	// Load agent configurations from JSON files
+	agent1Config, err := agent.LoadAgentConfig("internal/agent/grizzly.json")
+	if err != nil {
+		logger.Fatalf("Failed to load grizzly config: %v", err)
 	}
 
-	agent2Config := agent.AgentConfig{
-		Name:        "Tiger Specialist",
-		Role:        "Big cat researcher and tiger conservation expert. Has studied tigers across Asia for 20 years, documenting their hunting techniques and physical capabilities. Firmly believes tigers are nature's perfect predators.",
-		Voice:       types.VoiceOnyx,
-		Temperature: 1.5, // Higher temperature for more emotional responses
-		MaxTokens:   150,
-		TopP:        0.9,
+	agent2Config, err := agent.LoadAgentConfig("internal/agent/tiger.json")
+	if err != nil {
+		logger.Fatalf("Failed to load tiger config: %v", err)
 	}
 
 	// Create agents
