@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"sort"
-	"strings"
+	//"sort"
+	//"strings"
 	"sync"
 	"time"
 
@@ -327,7 +327,7 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 	}
 
 	// Process agent responses
-	responses := make([]agentResponse, 0, len(s.agents))
+	responses := make(map[string]string)
 	// scores := make(map[string]*scoring.ArgumentScore)
 	var wg sync.WaitGroup
 	var responseMutex sync.Mutex
@@ -338,7 +338,7 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 		go func(agentName string, agent *agent.Agent) {
 			defer wg.Done()
 
-			// Determine response order (1 for directly addressed, 2 for others)
+			/* // Determine response order (1 for directly addressed, 2 for others)
 			order := 2
 			messageLower := strings.ToLower(msg.Message)
 			nameLower := strings.ToLower(agentName)
@@ -350,7 +350,7 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 			   strings.Contains(messageLower, "tony") && strings.Contains(agentName, "Tony") ||
 			   strings.Contains(messageLower, "mike") && strings.Contains(agentName, "Mike") {
 				order = 1
-			}
+			} */
 
 			prompt := fmt.Sprintf(`Current conversation context:
 %s
@@ -403,23 +403,47 @@ Keep it fun, keep it spicy, but make your points count!
 			// }
 
 			responseMutex.Lock()
-			responses = append(responses, agentResponse{
+			/* responses = append(responses, agentResponse{
 				name:     agentName,
 				response: response,
 				order:    order,
-			})
+			}) */
+			responses[agentName] = response
 			responseMutex.Unlock()
 		}(name, a)
 	}
 
 	wg.Wait()
 
-	// Sort responses so directly addressed agents respond first
+	/* // Sort responses so directly addressed agents respond first
 	sort.SliceStable(responses, func(i, j int) bool {
 		return responses[i].order < responses[j].order
-	})
+	}) */
 
-	// Send responses in sequence with a delay
+	//! fix
+	// Send responses in sequence
+	for name, response := range responses {
+		// score := scores[name]
+		message := gin.H{
+			"type":    "text",
+			"message": response,
+			"agent":   name,
+		}
+
+		// if score != nil {
+		// 	message["scores"] = gin.H{
+		// 		"argument": score,
+		// 	}
+		// }
+
+		if err := ws.WriteJSON(message); err != nil {
+			log.Printf("Failed to send response for %s: %v", name, err)
+			continue
+		}
+
+		time.Sleep(s.config.ResponseDelay)
+	}
+	/* // Send responses in sequence with a delay
 	for _, resp := range responses {
 		agent := s.agents[resp.name]
 
@@ -429,17 +453,22 @@ Keep it fun, keep it spicy, but make your points count!
 		// Send text response
 		if err := ws.WriteJSON(gin.H{
 			"type":    "text",
-			"message": response,
-			"agent":   name,
+			"message": resp.response,
+			"agent":   resp.name,
 		}); err != nil {
-			log.Printf("Failed to send text response for %s: %v", name, err)
+			log.Printf("Failed to send text response for %s: %v", resp.name, err)
 			continue
 		}
 
 		// Generate and send audio
-		audioData, err := agent.GenerateAndStreamAudio(ctx, response)
+		audioData, err := agent.GenerateAndStreamAudio(ctx, resp.response)
+		if err != nil {
+			log.Printf("Failed to generate audio for %s: %v", resp.name, err)
+			continue
+		}
+
 		if err := ws.WriteJSON(message); err != nil {
-			log.Printf("Failed to send response for %s: %v", name, err)
+			log.Printf("Failed to send response for %s: %v", resp.name, err)
 			continue
 		}
 
@@ -461,7 +490,7 @@ Keep it fun, keep it spicy, but make your points count!
 
 		// Add delay between agent responses
 		time.Sleep(2 * time.Second)
-	}
+	} */
 
 	// After processing the message and getting agent response
 	s.analyzeConviction(context.Background(), ws)
