@@ -33,6 +33,7 @@ type Server struct {
 	conversationLog    []ConversationEntry
 	conversationMutex  sync.RWMutex
 	judge              *tools.ConvictionJudge
+	useHTTPS           bool
 }
 
 type ConversationEntry struct {
@@ -60,7 +61,7 @@ var upgrader = websocket.Upgrader{
 	EnableCompression: true,
 }
 
-func NewServer(agents map[string]*agent.Agent, apiKey string) *Server {
+func NewServer(agents map[string]*agent.Agent, apiKey string, useHTTPS bool) *Server {
 	judge, err := tools.NewConvictionJudge(apiKey)
 	if err != nil {
 		log.Printf("Warning: Failed to create conviction judge: %v", err)
@@ -92,6 +93,7 @@ func NewServer(agents map[string]*agent.Agent, apiKey string) *Server {
 		lastPlayerMessage: time.Now(),
 		conversationLog:   make([]ConversationEntry, 0),
 		judge:             judge,
+		useHTTPS:          useHTTPS,
 	}
 
 	router.GET("/ws/conversation", server.handleConversationWebSocket)
@@ -480,6 +482,19 @@ func (s *Server) listAgents(c *gin.Context) {
 }
 
 func (s *Server) Run(addr string) error {
+	if s.useHTTPS {
+		return s.runHTTPS(addr)
+	}
+	return s.runHTTP(addr)
+}
+
+func (s *Server) runHTTP(addr string) error {
+	log.Printf("Starting HTTP server on %s...", addr)
+	return s.router.Run(addr)
+}
+
+func (s *Server) runHTTPS(addr string) error {
+	log.Printf("Starting HTTPS server with HTTP/3 support on %s...", addr)
 	srv := &http.Server{
 		Addr:    addr,
 		Handler: s.router,
@@ -498,7 +513,7 @@ func (s *Server) Run(addr string) error {
 	// Start the HTTP/3 server
 	go func() {
 		if err := http3Srv.ListenAndServeTLS("cert.pem", "key.pem"); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("HTTP/3 server failed: %v", err)
+			log.Printf("HTTP/3 server failed: %v", err)
 		}
 	}()
 

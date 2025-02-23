@@ -28,6 +28,9 @@ func main() {
 		logger.Fatalf("OPENAI_API_KEY is not set in the environment variables")
 	}
 
+	// Check if HTTPS should be used
+	useHTTPS := os.Getenv("USE_HTTPS") == "true"
+
 	// Create agent configurations
 	agent1Config := agent.AgentConfig{
 		Name:        "Bear Expert",
@@ -94,8 +97,12 @@ The debate should focus on factual evidence while acknowledging the passion each
 	}
 
 	// Create and start the server
-	srv := server.NewServer(agents, apiKey)
-	logger.Println("Starting HTTPS server with HTTP/3 support on :8080...")
+	srv := server.NewServer(agents, apiKey, useHTTPS)
+	if useHTTPS {
+		logger.Println("Starting HTTPS server with HTTP/3 support on :8080...")
+	} else {
+		logger.Println("Starting HTTP server on :8080...")
+	}
 	if err := srv.Run(":8080"); err != nil {
 		logger.Fatalf("Server failed: %v", err)
 	}
