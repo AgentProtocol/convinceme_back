@@ -235,11 +235,7 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 		s.lastPlayerMessage = time.Now()
 		s.playerMessageMutex.Unlock()
 
-		if msg.Message == "" {
-			s.continueAgentDiscussion(ws)
-		} else {
-			s.handlePlayerMessage(ws, msg)
-		}
+		s.continueAgentDiscussion(ws, msg)
 	}
 }
 
@@ -269,25 +265,10 @@ func (s *Server) getNextAgent() *agent.Agent {
 	return nil
 }
 
-func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage) {
-	// Add player message to conversation log
-	s.addToConversationLog("Player", msg.Message, true)
-
-	// Get conversation context
-	conversationContext := s.getConversationContext()
-
-	// Generate responses from both agents
-	ctx := context.Background()
-	responses := make(map[string]string)
-	var wg sync.WaitGroup
-	var responseMutex sync.Mutex
-
-	for name, a := range s.agents {
-		wg.Add(1)
-		go func(agentName string, agent *agent.Agent) {
-			defer wg.Done()
-
-			prompt := fmt.Sprintf(`You are participating in a structured debate about whether bears or tigers are the superior predator.
+func getPrompt(promptType string) string {
+	switch promptType {
+	case "player_message":
+		return `You are participating in a structured debate about whether bears or tigers are the superior predator.
 
 Current conversation context:
 %s
@@ -302,86 +283,9 @@ Remember:
 6. Be passionate but factual about your position
 7. Do not repeat or acknowledge the player's message directly - just continue the debate naturally
 
-Generate a response that maintains the debate focus and supports your position.`,
-				conversationContext,
-				agent.GetName(),
-				agent.GetRole())
-
-			response, err := agent.GenerateResponse(ctx, msg.Topic, prompt)
-			if err != nil {
-				log.Printf("Failed to generate response for %s: %v", agentName, err)
-				return
-			}
-
-			responseMutex.Lock()
-			responses[agentName] = response
-			responseMutex.Unlock()
-		}(name, a)
-	}
-
-	wg.Wait()
-
-	// Send responses in sequence with a delay
-	for name, response := range responses {
-		agent := s.agents[name]
-
-		// Add agent response to conversation log
-		s.addToConversationLog(name, response, false)
-
-		// Send text response
-		if err := ws.WriteJSON(gin.H{
-			"type":    "text",
-			"message": response,
-			"agent":   name,
-		}); err != nil {
-			log.Printf("Failed to send text response for %s: %v", name, err)
-			continue
-		}
-
-		// Generate and send audio
-		audioData, err := agent.GenerateAndStreamAudio(ctx, response)
-		if err != nil {
-			log.Printf("Failed to generate audio for %s: %v", name, err)
-			continue
-		}
-
-		audioID := fmt.Sprintf("%s_%d", name, time.Now().UnixNano())
-		s.cacheMutex.Lock()
-		s.audioCache[audioID] = audioCache{
-			data:      audioData,
-			timestamp: time.Now(),
-		}
-		s.cacheMutex.Unlock()
-
-		if err := ws.WriteJSON(gin.H{
-			"type":     "audio",
-			"audioUrl": fmt.Sprintf("/api/audio/%s", audioID),
-			"agent":    name,
-		}); err != nil {
-			log.Printf("Failed to send audio URL for %s: %v", name, err)
-		}
-
-		// Add delay between agent responses
-		time.Sleep(2 * time.Second)
-	}
-
-	// After processing the message and getting agent response
-	s.analyzeConviction(context.Background(), ws)
-}
-
-func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
-	// Get conversation context
-	conversationContext := s.getConversationContext()
-
-	// Get the next agent to speak
-	agent := s.getNextAgent()
-	if agent == nil {
-		log.Printf("No agents available")
-		return
-	}
-
-	ctx := context.Background()
-	prompt := fmt.Sprintf(`You are participating in a structured debate about whether bears or tigers are the superior predator.
+Generate a response that maintains the debate focus and supports your position.`
+	case "continue_debate":
+		return `You are participating in a structured debate about whether bears or tigers are the superior predator.
 
 Current conversation context:
 %s
@@ -404,7 +308,32 @@ Key debate points to consider:
 - Historical encounters and documented fights
 - Biological advantages and disadvantages
 
-Generate a response that advances the debate while maintaining scientific credibility.`,
+Generate a response that advances the debate while maintaining scientific credibility.`
+	default:
+		return ""
+	}
+}
+
+func (s *Server) continueAgentDiscussion(ws *websocket.Conn, msg ConversationMessage) {
+	// Get conversation context
+	conversationContext := s.getConversationContext()
+
+	// Get the next agent to speak
+	agent := s.getNextAgent()
+	if agent == nil {
+		log.Printf("No agents available")
+		return
+	}
+
+	promptType := "continue_debate"
+	if msg.Message == "" {
+		// Add player message to conversation log
+		s.addToConversationLog("Player", msg.Message, true)
+		promptType = "player_message"
+	}
+
+	ctx := context.Background()
+	prompt := fmt.Sprintf(getPrompt(promptType),
 		conversationContext,
 		agent.GetName(),
 		agent.GetRole())
@@ -428,6 +357,10 @@ Generate a response that advances the debate while maintaining scientific credib
 		return
 	}
 
+	// After each agent response
+	// Before generating audio
+	s.analyzeConviction(context.Background(), ws)
+
 	// Generate and send audio
 	audioData, err := agent.GenerateAndStreamAudio(ctx, response)
 	if err != nil {
@@ -450,9 +383,6 @@ Generate a response that advances the debate while maintaining scientific credib
 	}); err != nil {
 		log.Printf("Failed to send audio URL: %v", err)
 	}
-
-	// After each agent response
-	s.analyzeConviction(context.Background(), ws)
 }
 
 func (s *Server) startConversation(c *gin.Context) {
