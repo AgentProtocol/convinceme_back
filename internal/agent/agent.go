@@ -57,7 +57,7 @@ func NewAgent(apiKey string, config AgentConfig) (*Agent, error) {
 	// Configure OpenAI client options
 	opts := []openai.Option{
 		openai.WithToken(apiKey),
-		openai.WithModel("o1-mini"),
+		openai.WithModel("gpt-4-turbo"),
 	}
 
 	// Create LLM client with configuration
@@ -96,7 +96,25 @@ Generate a response that:
 4. Shows appropriate emotional response
 5. Stays relevant to the topic while allowing for natural topic transitions
 
-Temperature: %.1f, Creativity level: %s`,
+Temperature: %.1f, Creativity level: %s
+
+2. WHEN RESPONDING:
+   - Use straightforward language to explain your points
+   - Directly counter Mike's claims with simple examples
+   - Maintain a friendly and engaging tone
+3. EXAMPLES OF RESPONSES:
+   - "Tigers are great at using their environment to their advantage, which gives them an edge."
+   - "While grizzlies are strong, a tiger's speed and strategy make it a tough competitor."
+   - "I think tigers have the skills to adapt and thrive, even in challenging situations."
+
+Temperature: %.1f, Creativity level: %s
+
+2. WHEN RESPONDING:
+   - Challenge Mike's last statement with specific tiger facts
+   - Use wit and humor to undermine his arguments
+   - Skip repetitive greetings and dive into the debate
+   - Keep the conversation focused and engaging
+`,
 		a.config.Name, a.config.Role, recentContext, topic, previousMessage,
 		a.config.Temperature, getCreativityLevel(a.config.Temperature))
 
