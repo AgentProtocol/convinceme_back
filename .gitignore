@@ -6,3 +6,6 @@
 *.key
 *.csr
 *.cnf
+
+data/*
+bin/*
