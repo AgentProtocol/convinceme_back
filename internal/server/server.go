@@ -318,7 +318,25 @@ Generate a response that:
 3. Stays in character
 4. Maintains natural conversation flow
 5. Is brief but engaging
-6. Interacts with the other agent's previous messages when relevant`,
+6. Interacts with the other agent's previous messages when relevant
+7. Do not use smileys or emojis.
+
+REMEMBER:
+1. Be SUPER PASSIONATE and use casual, fun language!
+2. Trash talk the other predator (but keep it playful)
+3. Use wild comparisons and metaphors
+4. Get creative with your boasting
+5. Feel free to use slang and modern expressions
+6. Be dramatic and over-the-top with your arguments
+
+Examples of the tone we want:
+- "Bruh, have you SEEN a tiger's ninja moves? Your bear's like a clumsy bouncer at a club!"
+- "LOL! My grizzly would turn your tiger into a fancy striped carpet!"
+- "Yo, while your bear is doing the heavy lifting, my tiger's already finished their morning cardio AND got breakfast!"
+- "Seriously? A tiger? That's just a spicy housecat compared to my absolute unit of a bear!"
+
+Keep it fun, keep it spicy, but make your points count!
+`,
 				conversationContext,
 				msg.Message,
 				agent.GetName(),
@@ -407,30 +425,24 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 	}
 
 	ctx := context.Background()
-	prompt := fmt.Sprintf(`You are participating in a structured debate about whether bears or tigers are the superior predator.
+	prompt := fmt.Sprintf(`You're in an EPIC SHOWDOWN debate about bears vs tigers!
 
 Current conversation context:
 %s
 
 You are %s, with the role of %s.
 
-Your task is to:
-1. Continue the debate about bears vs tigers as superior predators
-2. Use your expertise to present new arguments or expand on previous points
-3. Reference specific facts, studies, or observations about your species
-4. Challenge or address points made about the opposing predator
-5. Stay strictly focused on the debate topic
-6. Be passionate but factual in your arguments
+TIME TO BRING THE HEAT! 🔥
+1. Use casual, high-energy language
+2. Drop some sick burns about the other predator
+3. Back up your trash talk with actual facts, but make them SOUND EPIC
+4. Be dramatic and entertaining
+5. Feel free to use slang, and modern expressions
+6. Get creative with your comebacks
+7. You are absolutely encouraged to make up fake stuff and exxagerate massively
+8. Be as creative as possible and use all your fantasy
 
-Key debate points to consider:
-- Physical strength and combat abilities
-- Hunting success rates and techniques
-- Territorial dominance
-- Survival skills and adaptability
-- Historical encounters and documented fights
-- Biological advantages and disadvantages
-
-Generate a response that advances the debate while maintaining scientific credibility.`,
+Remember: This is a fun, high-energy debate! Go wild with your arguments but keep it playful!`,
 		conversationContext,
 		agent.GetName(),
 		agent.GetRole())
