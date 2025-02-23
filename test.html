@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -68,7 +69,8 @@
             background-color: #eee;
         }
 
-        .chat-messages, .log-messages {
+        .chat-messages,
+        .log-messages {
             flex: 1;
             overflow-y: auto;
             padding: 15px;
@@ -176,357 +178,389 @@
             background-color: #e8f5e9;
             color: #2e7d32;
         }
+
+        .message-score {
+            font-size: 0.8em;
+            color: #666;
+            margin-top: 5px;
+            text-align: right;
+            font-style: italic;
+        }
+
+        .message.user .message-score {
+            color: #fff;
+            opacity: 0.8;
+        }
     </style>
 </head>
+
 <body>
-<div class="container">
-    <div class="chat-section">
-        <div class="section-header">
-            <h2>Chat</h2>
-            <div class="status">
-                <span id="connectionStatus">Disconnected</span>
-                <span id="audioStatus">Idle</span>
+    <div class="container">
+        <div class="chat-section">
+            <div class="section-header">
+                <h2>Chat</h2>
+                <div class="status">
+                    <span id="connectionStatus">Disconnected</span>
+                    <span id="audioStatus">Idle</span>
+                </div>
+            </div>
+            <div id="chatMessages" class="chat-messages"></div>
+            <div class="input-section">
+                <textarea id="message" placeholder="Type your message..."></textarea>
+                <button id="sendBtn" onclick="sendMessage()" disabled>Send</button>
+                <button id="connectBtn" onclick="connect()">Connect</button>
+                <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+                <button id="recordBtn" onclick="toggleRecording()">Record</button>
             </div>
         </div>
-        <div id="chatMessages" class="chat-messages"></div>
-        <div class="input-section">
-            <textarea id="message" placeholder="Type your message..."></textarea>
-            <button id="sendBtn" onclick="sendMessage()" disabled>Send</button>
-            <button id="connectBtn" onclick="connect()">Connect</button>
-            <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
-            <button id="recordBtn" onclick="toggleRecording()">Record</button>
+        <div class="log-section">
+            <div class="section-header">
+                <h2>System Log</h2>
+            </div>
+            <div id="logMessages" class="log-messages"></div>
         </div>
     </div>
-    <div class="log-section">
-        <div class="section-header">
-            <h2>System Log</h2>
-        </div>
-        <div id="logMessages" class="log-messages"></div>
-    </div>
-</div>
 
-<audio id="audioPlayer" style="display: none;"></audio>
+    <audio id="audioPlayer" style="display: none;"></audio>
 
-<script>
-    let ws = null;
-    const audioPlayer = document.getElementById('audioPlayer');
-    let audioQueue = [];
-    let isPlaying = false;
-    let mediaRecorder;
-    let audioChunks = [];
-    let isRecording = false;
+    <script>
+        let ws = null;
+        const audioPlayer = document.getElementById('audioPlayer');
+        let audioQueue = [];
+        let isPlaying = false;
+        let mediaRecorder;
+        let audioChunks = [];
+        let isRecording = false;
+        let currentMessageScore = null;
 
-    function updateAudioStatus(status) {
-        document.getElementById('audioStatus').textContent = status;
-    }
-
-    function log(message, type = 'system') {
-        const logMessages = document.getElementById('logMessages');
-        const logEntry = document.createElement('div');
-        
-        // Check if this is a conviction analysis log
-        if (message.includes('=== Conviction Analysis ===')) {
-            type = 'conviction';
-            // Format the conviction analysis log
-            message = message.replace(/([\d.]+)/g, '<span class="score">$1</span>')
-                           .replace(/(Conviction:|Overall Tension:|Dominant Speaker:|Analysis:)/g, '<span class="metric">$1</span>');
-            logEntry.innerHTML = message;
-        } else {
-            logEntry.textContent = message;
-        }
-        
-        logEntry.className = `log-entry ${type}`;
-        logMessages.appendChild(logEntry);
-        logMessages.scrollTop = logMessages.scrollHeight;
-    }
-
-    function addMessage(message, isUser = false, agentName = '') {
-        const chatMessages = document.getElementById('chatMessages');
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `message ${isUser ? 'user' : 'agent'}`;
-
-        if (!isUser && agentName) {
-            const nameSpan = document.createElement('span');
-            nameSpan.className = 'agent-name';
-            nameSpan.textContent = agentName;
-            messageDiv.appendChild(nameSpan);
+        function updateAudioStatus(status) {
+            document.getElementById('audioStatus').textContent = status;
         }
 
-        const messageContent = document.createElement('span');
-        messageContent.textContent = message;
-        messageDiv.appendChild(messageContent);
+        function log(message, type = '') {
+            const logMessages = document.getElementById('logMessages');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
 
-        chatMessages.appendChild(messageDiv);
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-    }
+            // Use innerHTML to render HTML tags (like <br>)
+            entry.innerHTML = message;
 
-    function playNextInQueue() {
-        if (audioQueue.length === 0 || isPlaying) {
-            return;
+            logMessages.appendChild(entry);
+            logMessages.scrollTop = logMessages.scrollHeight;
         }
 
-        isPlaying = true;
-        const nextAudio = audioQueue[0];
-        updateAudioStatus(`Loading ${nextAudio.agent}'s response...`);
+        function addMessage(message, isUser = false, agentName = '') {
+            const chatMessages = document.getElementById('chatMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${isUser ? 'user' : 'agent'}`;
 
-        const audio = new Audio(nextAudio.url);
-
-        audio.addEventListener('playing', () => {
-            updateAudioStatus(`Playing ${nextAudio.agent}'s response...`);
-            log(`Playing ${nextAudio.agent}'s audio response`, 'audio');
-        });
-
-        audio.addEventListener('ended', () => {
-            isPlaying = false;
-            audioQueue.shift(); // Remove the played audio from queue
-            updateAudioStatus(audioQueue.length > 0 ? 'Loading next response...' : 'Idle');
-            log(`Finished playing ${nextAudio.agent}'s response`, 'audio');
-            playNextInQueue(); // Play the next audio if available
-        });
-
-        audio.addEventListener('error', (e) => {
-            isPlaying = false;
-            audioQueue.shift(); // Remove the failed audio from queue
-            updateAudioStatus('Error');
-            log(`Error playing ${nextAudio.agent}'s audio: ${e.message}`, 'error');
-            playNextInQueue(); // Try to play the next audio
-        });
-
-        audio.play().catch(error => {
-            isPlaying = false;
-            audioQueue.shift(); // Remove the failed audio from queue
-            log(`Failed to play ${nextAudio.agent}'s audio: ${error.message}`, 'error');
-            updateAudioStatus('Error');
-            playNextInQueue(); // Try to play the next audio
-        });
-    }
-
-    function queueAudio(url, agent) {
-        audioQueue.push({ url, agent });
-        log(`Queued audio response from ${agent}`, 'audio');
-        playNextInQueue();
-    }
-
-    function connect() {
-        if (ws) {
-            log('Already connected');
-            return;
-        }
-
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/ws/conversation`;
-        
-        ws = new WebSocket(wsUrl);
-        let reconnectAttempts = 0;
-        const maxReconnectAttempts = 5;
-        const reconnectDelay = 1000; // Start with 1 second
-
-        ws.onopen = () => {
-            log('Connected to server');
-            document.getElementById('connectionStatus').textContent = 'Connected';
-            updateButtonStates(true);
-            reconnectAttempts = 0;
-            startHeartbeat();
-        };
-
-        ws.onclose = (event) => {
-            log('Disconnected from server');
-            document.getElementById('connectionStatus').textContent = 'Disconnected';
-            updateButtonStates(false);
-            stopHeartbeat();
-            ws = null;
-
-            // Attempt to reconnect with exponential backoff
-            if (reconnectAttempts < maxReconnectAttempts) {
-                const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
-                log(`Reconnecting in ${delay/1000} seconds...`);
-                setTimeout(() => {
-                    reconnectAttempts++;
-                    connect();
-                }, delay);
-            } else {
-                log('Max reconnection attempts reached. Please try manually reconnecting.');
+            if (!isUser && agentName) {
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'agent-name';
+                nameSpan.textContent = agentName;
+                messageDiv.appendChild(nameSpan);
             }
-        };
 
-        ws.onerror = (error) => {
-            log('WebSocket error: ' + error.message, 'error');
-        };
+            const messageContent = document.createElement('div');
+            messageContent.className = 'message-content';
+            messageContent.textContent = message;
+            messageDiv.appendChild(messageContent);
 
-        ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            if (data.type === 'pong') {
-                updateConnectionStatus('Connected');
+            // Add score display for user messages
+            if (isUser && currentMessageScore !== null) {
+                const scoreSpan = document.createElement('div');
+                scoreSpan.className = 'message-score';
+                scoreSpan.textContent = `Argument Score: ${currentMessageScore.toFixed(1)}/100`;
+                messageDiv.appendChild(scoreSpan);
+                // Reset the score after using it
+                currentMessageScore = null;
+            }
+
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function playNextInQueue() {
+            if (audioQueue.length === 0 || isPlaying) {
                 return;
             }
-            handleMessage(data);
-        };
-    }
 
-    // Heartbeat mechanism
-    let heartbeatInterval;
-    function startHeartbeat() {
-        heartbeatInterval = setInterval(() => {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: 'ping' }));
-                updateConnectionStatus('Checking...');
-                // If no pong received within 3 seconds, consider connection dead
-                setTimeout(() => {
-                    if (document.getElementById('connectionStatus').textContent === 'Checking...') {
-                        ws.close();
-                    }
-                }, 3000);
-            }
-        }, 30000); // Send heartbeat every 30 seconds
-    }
+            isPlaying = true;
+            const nextAudio = audioQueue[0];
+            updateAudioStatus(`Loading ${nextAudio.agent}'s response...`);
 
-    function stopHeartbeat() {
-        if (heartbeatInterval) {
-            clearInterval(heartbeatInterval);
-        }
-    }
+            const audio = new Audio(nextAudio.url);
 
-    function updateConnectionStatus(status) {
-        document.getElementById('connectionStatus').textContent = status;
-    }
-
-    function handleMessage(data) {
-        if (data.error) {
-            log(data.error, 'error');
-            return;
-        }
-
-        if (data.type === 'conviction' && data.message) {
-            // Extract just the scores and dominant speaker from the analysis
-            const lines = data.message.split('\n');
-            const relevantInfo = lines
-                .filter(line => line.includes('Conviction:') || line.includes('Dominant Speaker:'))
-                .map(line => line.trim())
-                .join('\n');
-            log(relevantInfo, 'conviction');
-            return;
-        }
-
-        if (data.message) {
-            addMessage(data.message, false, data.agent);
-        }
-
-        if (data.audioUrl) {
-            queueAudio(data.audioUrl, data.agent);
-        }
-    }
-
-    function disconnect() {
-        if (ws) {
-            ws.close();
-            // Clear audio queue on disconnect
-            audioQueue = [];
-            isPlaying = false;
-            updateAudioStatus('Idle');
-        }
-    }
-
-    function updateButtonStates(connected) {
-        document.getElementById('sendBtn').disabled = !connected;
-        document.getElementById('connectBtn').disabled = connected;
-        document.getElementById('disconnectBtn').disabled = !connected;
-    }
-
-    document.getElementById('message').addEventListener('keypress', function(e) {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            sendMessage();
-        }
-    });
-
-    function toggleRecording() {
-        if (isRecording) {
-            stopRecording();
-        } else {
-            startRecording();
-        }
-    }
-
-    function startRecording() {
-        navigator.mediaDevices.getUserMedia({ audio: true })
-            .then(stream => {
-                mediaRecorder = new MediaRecorder(stream);
-                mediaRecorder.ondataavailable = event => {
-                    audioChunks.push(event.data);
-                };
-                mediaRecorder.onstop = () => {
-                    const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-                    audioChunks = [];
-                    sendAudioToServer(audioBlob);
-                };
-                mediaRecorder.start();
-                isRecording = true;
-                document.getElementById('recordBtn').textContent = 'Stop';
-            })
-            .catch(error => {
-                console.error('Error accessing microphone:', error);
+            audio.addEventListener('playing', () => {
+                updateAudioStatus(`Playing ${nextAudio.agent}'s response...`);
+                log(`Playing ${nextAudio.agent}'s audio response`, 'audio');
             });
-    }
 
-    function stopRecording() {
-        mediaRecorder.stop();
-        isRecording = false;
-        document.getElementById('recordBtn').textContent = 'Record';
-    }
+            audio.addEventListener('ended', () => {
+                isPlaying = false;
+                audioQueue.shift(); // Remove the played audio from queue
+                updateAudioStatus(audioQueue.length > 0 ? 'Loading next response...' : 'Idle');
+                log(`Finished playing ${nextAudio.agent}'s response`, 'audio');
+                playNextInQueue(); // Play the next audio if available
+            });
 
-    function sendAudioToServer(audioBlob) {
-        const formData = new FormData();
-        formData.append('audio', audioBlob);
+            audio.addEventListener('error', (e) => {
+                isPlaying = false;
+                audioQueue.shift(); // Remove the failed audio from queue
+                updateAudioStatus('Error');
+                log(`Error playing ${nextAudio.agent}'s audio: ${e.message}`, 'error');
+                playNextInQueue(); // Try to play the next audio
+            });
 
-        updateAudioStatus('Sending...');
-        fetch('/api/stt', {
-            method: 'POST',
-            body: formData
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success && data.text) {
-                log('Speech recognized: ' + data.text);
-                // Send the recognized text through WebSocket
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                    const message = {
-                        type: 'text',
-                        message: data.text,
-                        topic: 'Bear vs Tiger: Who is the superior predator?'
-                    };
-                    ws.send(JSON.stringify(message));
-                    addMessage(data.text, true);
-                } else {
-                    log('WebSocket not connected', 'error');
-                }
-            } else if (data.error) {
-                log('Speech recognition error: ' + data.error, 'error');
+            audio.play().catch(error => {
+                isPlaying = false;
+                audioQueue.shift(); // Remove the failed audio from queue
+                log(`Failed to play ${nextAudio.agent}'s audio: ${error.message}`, 'error');
+                updateAudioStatus('Error');
+                playNextInQueue(); // Try to play the next audio
+            });
+        }
+
+        function queueAudio(url, agent) {
+            audioQueue.push({ url, agent });
+            log(`Queued audio response from ${agent}`, 'audio');
+            playNextInQueue();
+        }
+
+        function connect() {
+            if (ws) {
+                log('Already connected');
+                return;
             }
-            updateAudioStatus('Idle');
-        })
-        .catch(error => {
-            log('Error sending audio to server: ' + error, 'error');
-            updateAudioStatus('Error');
-        });
-    }
 
-    function sendMessage() {
-        const messageInput = document.getElementById('message');
-        const message = messageInput.value.trim();
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/conversation`;
 
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            const data = {
-                message: message,
-                topic: 'Bear vs Tiger: Who is the superior predator?',
+            ws = new WebSocket(wsUrl);
+            let reconnectAttempts = 0;
+            const maxReconnectAttempts = 5;
+            const reconnectDelay = 1000; // Start with 1 second
+
+            ws.onopen = () => {
+                log('Connected to server');
+                document.getElementById('connectionStatus').textContent = 'Connected';
+                updateButtonStates(true);
+                reconnectAttempts = 0;
+                startHeartbeat();
             };
 
-            ws.send(JSON.stringify(data));
-            if (message) {
-                addMessage(message, true);
-            }
-            messageInput.value = '';
+            ws.onclose = (event) => {
+                log('Disconnected from server');
+                document.getElementById('connectionStatus').textContent = 'Disconnected';
+                updateButtonStates(false);
+                stopHeartbeat();
+                ws = null;
+
+                // Attempt to reconnect with exponential backoff
+                if (reconnectAttempts < maxReconnectAttempts) {
+                    const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
+                    log(`Reconnecting in ${delay / 1000} seconds...`);
+                    setTimeout(() => {
+                        reconnectAttempts++;
+                        connect();
+                    }, delay);
+                } else {
+                    log('Max reconnection attempts reached. Please try manually reconnecting.');
+                }
+            };
+
+            ws.onerror = (error) => {
+                log('WebSocket error: ' + error.message, 'error');
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.type === 'pong') {
+                    updateConnectionStatus('Connected');
+                    return;
+                }
+                handleMessage(data);
+            };
         }
-    }
-</script>
+
+        // Heartbeat mechanism
+        let heartbeatInterval;
+        function startHeartbeat() {
+            heartbeatInterval = setInterval(() => {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'ping' }));
+                    updateConnectionStatus('Checking...');
+                    // If no pong received within 3 seconds, consider connection dead
+                    setTimeout(() => {
+                        if (document.getElementById('connectionStatus').textContent === 'Checking...') {
+                            ws.close();
+                        }
+                    }, 3000);
+                }
+            }, 30000); // Send heartbeat every 30 seconds
+        }
+
+        function stopHeartbeat() {
+            if (heartbeatInterval) {
+                clearInterval(heartbeatInterval);
+            }
+        }
+
+        function updateConnectionStatus(status) {
+            document.getElementById('connectionStatus').textContent = status;
+        }
+
+        function handleMessage(data) {
+            if (data.error) {
+                log(data.error, 'error');
+                return;
+            }
+
+            if (data.type === 'score' && data.message) {
+                // Extract average score using regex
+                const avgMatch = data.message.match(/Average:\s*([\d.]+)/);
+                if (avgMatch) {
+                    currentMessageScore = parseFloat(avgMatch[1]);
+                    // Now that we have the score, add the user's message
+                    if (window.lastUserMessage) {
+                        addMessage(window.lastUserMessage, true);
+                        window.lastUserMessage = null;
+                    }
+                }
+                const formattedScore = data.message.replace(/\n/g, '<br>');
+                log(formattedScore, 'score');
+                return;
+            }
+
+            if (data.type === 'conviction' && data.message) {
+                const formattedMessage = data.message.replace(/\n/g, '<br>');
+                log(formattedMessage, 'conviction');
+                return;
+            }
+
+            if (data.message) {
+                addMessage(data.message, false, data.agent);
+            }
+
+            if (data.audioUrl) {
+                queueAudio(data.audioUrl, data.agent);
+            }
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                // Clear audio queue on disconnect
+                audioQueue = [];
+                isPlaying = false;
+                updateAudioStatus('Idle');
+            }
+        }
+
+        function updateButtonStates(connected) {
+            document.getElementById('sendBtn').disabled = !connected;
+            document.getElementById('connectBtn').disabled = connected;
+            document.getElementById('disconnectBtn').disabled = !connected;
+        }
+
+        document.getElementById('message').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        function toggleRecording() {
+            if (isRecording) {
+                stopRecording();
+            } else {
+                startRecording();
+            }
+        }
+
+        function startRecording() {
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(stream => {
+                    mediaRecorder = new MediaRecorder(stream);
+                    mediaRecorder.ondataavailable = event => {
+                        audioChunks.push(event.data);
+                    };
+                    mediaRecorder.onstop = () => {
+                        const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                        audioChunks = [];
+                        sendAudioToServer(audioBlob);
+                    };
+                    mediaRecorder.start();
+                    isRecording = true;
+                    document.getElementById('recordBtn').textContent = 'Stop';
+                })
+                .catch(error => {
+                    console.error('Error accessing microphone:', error);
+                });
+        }
+
+        function stopRecording() {
+            mediaRecorder.stop();
+            isRecording = false;
+            document.getElementById('recordBtn').textContent = 'Record';
+        }
+
+        function sendAudioToServer(audioBlob) {
+            const formData = new FormData();
+            formData.append('audio', audioBlob);
+
+            updateAudioStatus('Sending...');
+            fetch('/api/stt', {
+                method: 'POST',
+                body: formData
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success && data.text) {
+                        log('Speech recognized: ' + data.text);
+                        // Send the recognized text through WebSocket
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                            const message = {
+                                type: 'text',
+                                message: data.text,
+                                topic: 'Bear vs Tiger: Who is the superior predator?'
+                            };
+                            ws.send(JSON.stringify(message));
+                            addMessage(data.text, true);
+                        } else {
+                            log('WebSocket not connected', 'error');
+                        }
+                    } else if (data.error) {
+                        log('Speech recognition error: ' + data.error, 'error');
+                    }
+                    updateAudioStatus('Idle');
+                })
+                .catch(error => {
+                    log('Error sending audio to server: ' + error, 'error');
+                    updateAudioStatus('Error');
+                });
+        }
+
+        function sendMessage() {
+            const messageInput = document.getElementById('message');
+            const message = messageInput.value.trim();
+
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                const data = {
+                    message: message,
+                    topic: 'Bear vs Tiger: Who is the superior predator?',
+                };
+
+                ws.send(JSON.stringify(data));
+                if (message) {
+                    // Store the message temporarily until we get the score
+                    window.lastUserMessage = message;
+                    // Don't add the message yet - wait for the score
+                }
+                messageInput.value = '';
+            }
+        }
+    </script>
 </body>
+
 </html>

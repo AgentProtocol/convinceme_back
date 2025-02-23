@@ -20,6 +20,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/neo/convinceme_backend/internal/agent"
 	"github.com/neo/convinceme_backend/internal/tools"
+	"github.com/neo/convinceme_backend/internal/scoring"
 )
 
 type Server struct {
@@ -35,6 +36,9 @@ type Server struct {
 	conversationLog    []ConversationEntry
 	conversationMutex  sync.RWMutex
 	judge              *tools.ConvictionJudge
+	useHTTPS           bool
+	config             *Config
+	scorer             *scoring.Scorer
 }
 
 type ConversationEntry struct {
@@ -62,10 +66,15 @@ var upgrader = websocket.Upgrader{
 	EnableCompression: true,
 }
 
-func NewServer(agents map[string]*agent.Agent, apiKey string) *Server {
+func NewServer(agents map[string]*agent.Agent, apiKey string, useHTTPS bool, config *Config) *Server {
 	judge, err := tools.NewConvictionJudge(apiKey)
 	if err != nil {
 		log.Printf("Warning: Failed to create conviction judge: %v", err)
+	}
+
+	scorer, err := scoring.NewScorer(apiKey)
+	if err != nil {
+		log.Printf("Warning: Failed to initialize scorer: %v", err)
 	}
 
 	router := gin.Default()
@@ -94,6 +103,9 @@ func NewServer(agents map[string]*agent.Agent, apiKey string) *Server {
 		lastPlayerMessage: time.Now(),
 		conversationLog:   make([]ConversationEntry, 0),
 		judge:             judge,
+		useHTTPS:          useHTTPS,
+		config:            config,
+		scorer:            scorer,
 	}
 
 	router.GET("/ws/conversation", server.handleConversationWebSocket)
@@ -283,10 +295,44 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 		response string
 		order    int
 	}
+
+	// Score the user's message first
+	if s.scorer != nil {
+		log.Printf("\n=== Scoring User Message ===\n")
+		score, err := s.scorer.ScoreArgument(ctx, msg.Message, msg.Topic)
+		if err != nil {
+			log.Printf("Failed to score user message: %v", err)
+		} else {
+			// Send score back to user
+			if err := ws.WriteJSON(gin.H{
+				"type": "score",
+				"message": fmt.Sprintf("Argument score:\n"+
+                    "Strength: %d/100\n"+
+                    "Relevance: %d/100\n"+
+                    "Logic: %d/100\n"+
+                    "Truth: %d/100\n"+
+                    "Humor: %d/100\n"+
+                    "Average: %.1f/100\n",
+                    score.Strength,
+                    score.Relevance,
+                    score.Logic,
+                    score.Truth,
+                    score.Humor,
+                    score.Average),
+			}); 
+			err != nil {
+				log.Printf("Failed to send score to user: %v", err)
+			}
+		}
+	}
+
+	// Process agent responses
 	responses := make([]agentResponse, 0, len(s.agents))
+	// scores := make(map[string]*scoring.ArgumentScore)
 	var wg sync.WaitGroup
 	var responseMutex sync.Mutex
 
+	// Generate responses from agents
 	for name, a := range s.agents {
 		wg.Add(1)
 		go func(agentName string, agent *agent.Agent) {
@@ -348,6 +394,14 @@ Keep it fun, keep it spicy, but make your points count!
 				return
 			}
 
+			// Score agent's response
+			// var argScore *scoring.ArgumentScore
+			// if s.scorer != nil {
+			// 	if score, err := s.scorer.ScoreArgument(ctx, response, msg.Topic); err == nil {
+			// 		argScore = score
+			// 	}
+			// }
+
 			responseMutex.Lock()
 			responses = append(responses, agentResponse{
 				name:     agentName,
@@ -375,17 +429,17 @@ Keep it fun, keep it spicy, but make your points count!
 		// Send text response
 		if err := ws.WriteJSON(gin.H{
 			"type":    "text",
-			"message": resp.response,
-			"agent":   resp.name,
+			"message": response,
+			"agent":   name,
 		}); err != nil {
-			log.Printf("Failed to send text response for %s: %v", resp.name, err)
+			log.Printf("Failed to send text response for %s: %v", name, err)
 			continue
 		}
 
 		// Generate and send audio
-		audioData, err := agent.GenerateAndStreamAudio(ctx, resp.response)
-		if err != nil {
-			log.Printf("Failed to generate audio for %s: %v", resp.name, err)
+		audioData, err := agent.GenerateAndStreamAudio(ctx, response)
+		if err := ws.WriteJSON(message); err != nil {
+			log.Printf("Failed to send response for %s: %v", name, err)
 			continue
 		}
 
@@ -520,6 +574,19 @@ func (s *Server) listAgents(c *gin.Context) {
 }
 
 func (s *Server) Run(addr string) error {
+	if s.useHTTPS {
+		return s.runHTTPS(addr)
+	}
+	return s.runHTTP(addr)
+}
+
+func (s *Server) runHTTP(addr string) error {
+	log.Printf("Starting HTTP server on %s...", addr)
+	return s.router.Run(addr)
+}
+
+func (s *Server) runHTTPS(addr string) error {
+	log.Printf("Starting HTTPS server with HTTP/3 support on %s...", addr)
 	srv := &http.Server{
 		Addr:    addr,
 		Handler: s.router,
@@ -538,7 +605,7 @@ func (s *Server) Run(addr string) error {
 	// Start the HTTP/3 server
 	go func() {
 		if err := http3Srv.ListenAndServeTLS("cert.pem", "key.pem"); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("HTTP/3 server failed: %v", err)
+			log.Printf("HTTP/3 server failed: %v", err)
 		}
 	}()
 

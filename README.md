@@ -49,9 +49,10 @@ ConvinceMe is a sophisticated Go-based platform that enables dynamic, real-time 
    Create a `.env` file in the project root:
    ```env
    OPENAI_API_KEY=your_openai_api_key
+   USE_HTTPS=false  # Set to "true" for HTTPS, or "false" for HTTP
    ```
 
-4. **Generate TLS Certificates**:
+4. **Generate TLS Certificates** (only needed for HTTPS mode):
    ```bash
    openssl genpkey -algorithm RSA -out key.pem
    openssl req -new -key key.pem -out cert.csr
