@@ -54,17 +54,7 @@ func main() {
 	inputHandler := player.NewInputHandler(logger)
 
 	// Define the debate topic with explicit initial context
-	commonTopic := `Bear vs Tiger: Who is the superior predator?
-
-Key points to debate:
-- Physical strength and combat abilities
-- Hunting success rates and techniques
-- Territorial dominance
-- Survival skills and adaptability
-- Historical encounters and documented fights
-- Biological advantages and disadvantages
-
-The debate should focus on factual evidence while acknowledging the passion each expert has for their respective species.`
+	commonTopic := "Grizzly bears vs Tigers - who would win a fight?"
 
 	// Create conversation configuration with the common topic
 	convConfig := conversation.ConversationConfig{
