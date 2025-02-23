@@ -1,2 +1,8 @@
 .env
 /static/hls/*
+
+*.pem
+*.crt
+*.key
+*.csr
+*.cnf
