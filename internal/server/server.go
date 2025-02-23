@@ -285,22 +285,19 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 		go func(agentName string, agent *agent.Agent) {
 			defer wg.Done()
 
-			prompt := fmt.Sprintf(`You are participating in a structured debate about whether bears or tigers are the superior predator.
-
-Current conversation context:
+			prompt := fmt.Sprintf(`Current conversation context:
 %s
 
-You are %s, with the role of %s.
-Remember:
-1. Stay strictly focused on the bear vs tiger debate
-2. Use your expertise to support your position
-3. Reference specific facts and studies about your species
-4. Address any points about the opposing predator with scientific counter-arguments
-5. Never deviate from the debate topic
-6. Be passionate but factual about your position
-7. Do not repeat or acknowledge the player's message directly - just continue the debate naturally
+A player has just said: "%s"
 
-Generate a response that maintains the debate focus and supports your position.`,
+You are %s, with the role of %s.
+Generate a response that:
+1. Shows you understand the full conversation context
+2. Acknowledges the player's message
+3. Stays in character
+4. Maintains natural conversation flow
+5. Is brief but engaging
+6. Interacts with the other agent's previous messages when relevant`,
 				conversationContext,
 				agent.GetName(),
 				agent.GetRole())

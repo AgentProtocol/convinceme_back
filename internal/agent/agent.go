@@ -114,6 +114,7 @@ Temperature: %.1f, Creativity level: %s
    - Use wit and humor to undermine his arguments
    - Skip repetitive greetings and dive into the debate
    - Keep the conversation focused and engaging
+   - If the user asks a question, answer it directly with specific focus on the topic and briefly
 `,
 		a.config.Name, a.config.Role, recentContext, topic, previousMessage,
 		a.config.Temperature, getCreativityLevel(a.config.Temperature))
