@@ -1,0 +1,139 @@
+.message-scores {
+    margin-top: 10px;
+    padding: 15px;
+    background: rgba(0, 0, 0, 0.05);
+    border-radius: 8px;
+}
+
+.score-header {
+    font-weight: bold;
+    margin-bottom: 10px;
+    color: #333;
+}
+
+.score-grid {
+    display: grid;
+    gap: 8px;
+}
+
+.score-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.score-label {
+    width: 80px;
+    font-size: 0.9em;
+    color: #666;
+}
+
+.score-bar {
+    flex: 1;
+    height: 20px;
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 10px;
+    position: relative;
+    overflow: hidden;
+}
+
+.score-fill {
+    position: absolute;
+    height: 100%;
+    background: linear-gradient(90deg, #4CAF50, #8BC34A);
+    border-radius: 10px;
+    transition: width 0.3s ease;
+}
+
+.score-value {
+    position: absolute;
+    width: 100%;
+    text-align: center;
+    line-height: 20px;
+    color: #fff;
+    text-shadow: 0 0 2px rgba(0, 0, 0, 0.5);
+    font-size: 0.9em;
+}
+
+.score-explanation {
+    margin-top: 10px;
+    font-style: italic;
+    color: #666;
+    font-size: 0.9em;
+}
+
+.argument-scores,
+.conviction-score {
+    margin-bottom: 10px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.message-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    padding: 4px 0;
+}
+
+.agent-name {
+    font-weight: bold;
+    color: #2196F3;
+}
+
+.conviction-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.conviction-label {
+    font-size: 0.9em;
+    color: #666;
+}
+
+.conviction-meter {
+    position: relative;
+    width: 100px;
+    height: 20px;
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.conviction-fill {
+    position: absolute;
+    height: 100%;
+    background: linear-gradient(90deg, #FF9800, #FF5722);
+    border-radius: 10px;
+    transition: width 0.3s ease;
+}
+
+.conviction-score {
+    position: absolute;
+    width: 100%;
+    text-align: center;
+    line-height: 20px;
+    color: #fff;
+    text-shadow: 0 0 2px rgba(0, 0, 0, 0.5);
+    font-size: 0.9em;
+    font-weight: bold;
+}
+
+/* Update existing message styles */
+.message {
+    padding: 12px;
+    margin: 8px 0;
+    border-radius: 8px;
+    background: #f5f5f5;
+}
+
+.agent-message {
+    background: #e3f2fd;
+}
+
+.message-content {
+    margin-top: 4px;
+    line-height: 1.4;
+}

@@ -90,20 +90,45 @@ The debate should focus on factual evidence while acknowledging the passion each
 	// Create a new conversation with the common topic
 	conv := conversation.NewConversation(agent1, agent2, convConfig, inputHandler, apiKey)
 
+	// Create server config with proper initialization
+	serverConfig := &server.Config{
+		OpenAIKey:     apiKey,
+		Port:          ":8080",
+		ResponseDelay: 500 * time.Millisecond,
+		Agents: map[string]server.AgentConfig{
+			agent1Config.Name: {
+				Name:           agent1Config.Name,
+				Role:           agent1Config.Role,
+				Model:          "gpt-4-turbo-preview",
+				Voice:          agent1Config.Voice.String(),
+				DebatePosition: "Bear Expert",
+			},
+			agent2Config.Name: {
+				Name:           agent2Config.Name,
+				Role:           agent2Config.Role,
+				Model:          "gpt-4-turbo-preview",
+				Voice:          agent2Config.Voice.String(),
+				DebatePosition: "Tiger Specialist",
+			},
+		},
+	}
+
 	// Create agents map
 	agents := map[string]*agent.Agent{
 		agent1Config.Name: agent1,
 		agent2Config.Name: agent2,
 	}
 
-	// Create and start the server
-	srv := server.NewServer(agents, apiKey, useHTTPS)
+	// Create and start the server with proper config
+	srv := server.NewServer(agents, apiKey, useHTTPS, serverConfig)
 	if useHTTPS {
 		logger.Println("Starting HTTPS server with HTTP/3 support on :8080...")
 	} else {
 		logger.Println("Starting HTTP server on :8080...")
 	}
-	if err := srv.Run(":8080"); err != nil {
+
+	// Start server with error handling
+	if err := srv.Run(serverConfig.Port); err != nil {
 		logger.Fatalf("Server failed: %v", err)
 	}
 

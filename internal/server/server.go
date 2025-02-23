@@ -18,6 +18,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/neo/convinceme_backend/internal/agent"
 	"github.com/neo/convinceme_backend/internal/tools"
+	"github.com/neo/convinceme_backend/internal/scoring"
 )
 
 type Server struct {
@@ -34,6 +35,8 @@ type Server struct {
 	conversationMutex  sync.RWMutex
 	judge              *tools.ConvictionJudge
 	useHTTPS           bool
+	config             *Config
+	scorer             *scoring.Scorer
 }
 
 type ConversationEntry struct {
@@ -61,10 +64,15 @@ var upgrader = websocket.Upgrader{
 	EnableCompression: true,
 }
 
-func NewServer(agents map[string]*agent.Agent, apiKey string, useHTTPS bool) *Server {
+func NewServer(agents map[string]*agent.Agent, apiKey string, useHTTPS bool, config *Config) *Server {
 	judge, err := tools.NewConvictionJudge(apiKey)
 	if err != nil {
 		log.Printf("Warning: Failed to create conviction judge: %v", err)
+	}
+
+	scorer, err := scoring.NewScorer(apiKey)
+	if err != nil {
+		log.Printf("Warning: Failed to initialize scorer: %v", err)
 	}
 
 	router := gin.Default()
@@ -94,6 +102,8 @@ func NewServer(agents map[string]*agent.Agent, apiKey string, useHTTPS bool) *Se
 		conversationLog:   make([]ConversationEntry, 0),
 		judge:             judge,
 		useHTTPS:          useHTTPS,
+		config:            config,
+		scorer:            scorer,
 	}
 
 	router.GET("/ws/conversation", server.handleConversationWebSocket)
@@ -270,99 +280,84 @@ func (s *Server) getNextAgent() *agent.Agent {
 }
 
 func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage) {
-	// Add player message to conversation log
-	s.addToConversationLog("Player", msg.Message, true)
-
-	// Get conversation context
-	conversationContext := s.getConversationContext()
-
-	// Generate responses from both agents
 	ctx := context.Background()
+
+	// Score the user's message first
+	if s.scorer != nil {
+		log.Printf("\n=== Scoring User Message ===\n")
+		score, err := s.scorer.ScoreArgument(ctx, msg.Message, msg.Topic)
+		if err != nil {
+			log.Printf("Failed to score user message: %v", err)
+		} else {
+			// Send score back to user
+			if err := ws.WriteJSON(gin.H{
+				"type": "score",
+				"scores": gin.H{
+					"argument": score,
+				},
+			}); err != nil {
+				log.Printf("Failed to send score to user: %v", err)
+			}
+		}
+	}
+
+	// Process agent responses
 	responses := make(map[string]string)
+	scores := make(map[string]*scoring.ArgumentScore)
 	var wg sync.WaitGroup
 	var responseMutex sync.Mutex
 
+	// Generate responses from agents
 	for name, a := range s.agents {
 		wg.Add(1)
 		go func(agentName string, agent *agent.Agent) {
 			defer wg.Done()
 
-			prompt := fmt.Sprintf(`You are participating in a structured debate about whether bears or tigers are the superior predator.
-
-Current conversation context:
-%s
-
-You are %s, with the role of %s.
-Remember:
-1. Stay strictly focused on the bear vs tiger debate
-2. Use your expertise to support your position
-3. Reference specific facts and studies about your species
-4. Address any points about the opposing predator with scientific counter-arguments
-5. Never deviate from the debate topic
-6. Be passionate but factual about your position
-7. Do not repeat or acknowledge the player's message directly - just continue the debate naturally
-
-Generate a response that maintains the debate focus and supports your position.`,
-				conversationContext,
-				agent.GetName(),
-				agent.GetRole())
-
+			prompt := fmt.Sprintf("Previous message: %s\nTopic: %s", msg.Message, msg.Topic)
 			response, err := agent.GenerateResponse(ctx, msg.Topic, prompt)
 			if err != nil {
 				log.Printf("Failed to generate response for %s: %v", agentName, err)
 				return
 			}
 
+			// Score agent's response
+			var argScore *scoring.ArgumentScore
+			if s.scorer != nil {
+				if score, err := s.scorer.ScoreArgument(ctx, response, msg.Topic); err == nil {
+					argScore = score
+				}
+			}
+
 			responseMutex.Lock()
 			responses[agentName] = response
+			scores[agentName] = argScore
 			responseMutex.Unlock()
 		}(name, a)
 	}
 
 	wg.Wait()
 
-	// Send responses in sequence with a delay
+	// Send responses in sequence
 	for name, response := range responses {
-		agent := s.agents[name]
-
-		// Add agent response to conversation log
-		s.addToConversationLog(name, response, false)
-
-		// Send text response
-		if err := ws.WriteJSON(gin.H{
+		score := scores[name]
+		message := gin.H{
 			"type":    "text",
 			"message": response,
 			"agent":   name,
-		}); err != nil {
-			log.Printf("Failed to send text response for %s: %v", name, err)
+		}
+
+		if score != nil {
+			message["scores"] = gin.H{
+				"argument": score,
+			}
+		}
+
+		if err := ws.WriteJSON(message); err != nil {
+			log.Printf("Failed to send response for %s: %v", name, err)
 			continue
 		}
 
-		// Generate and send audio
-		audioData, err := agent.GenerateAndStreamAudio(ctx, response)
-		if err != nil {
-			log.Printf("Failed to generate audio for %s: %v", name, err)
-			continue
-		}
-
-		audioID := fmt.Sprintf("%s_%d", name, time.Now().UnixNano())
-		s.cacheMutex.Lock()
-		s.audioCache[audioID] = audioCache{
-			data:      audioData,
-			timestamp: time.Now(),
-		}
-		s.cacheMutex.Unlock()
-
-		if err := ws.WriteJSON(gin.H{
-			"type":     "audio",
-			"audioUrl": fmt.Sprintf("/api/audio/%s", audioID),
-			"agent":    name,
-		}); err != nil {
-			log.Printf("Failed to send audio URL for %s: %v", name, err)
-		}
-
-		// Add delay between agent responses
-		time.Sleep(2 * time.Second)
+		time.Sleep(s.config.ResponseDelay)
 	}
 
 	// After processing the message and getting agent response
