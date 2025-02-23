@@ -292,7 +292,19 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 			// Send score back to user
 			if err := ws.WriteJSON(gin.H{
 				"type": "score",
-				"score": score.Average,
+				"message": fmt.Sprintf("Argument score:\n"+
+                    "Strength: %d/100\n"+
+                    "Relevance: %d/100\n"+
+                    "Logic: %d/100\n"+
+                    "Truth: %d/100\n"+
+                    "Humor: %d/100\n"+
+                    "Average: %.1f/100\n",
+                    score.Strength,
+                    score.Relevance,
+                    score.Logic,
+                    score.Truth,
+                    score.Humor,
+                    score.Average),
 			}); 
 			err != nil {
 				log.Printf("Failed to send score to user: %v", err)

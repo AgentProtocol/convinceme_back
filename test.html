@@ -223,23 +223,15 @@
             document.getElementById('audioStatus').textContent = status;
         }
 
-        function log(message, type = 'system') {
+        function log(message, type = '') {
             const logMessages = document.getElementById('logMessages');
-            const logEntry = document.createElement('div');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
 
-            // Check if this is a conviction analysis log
-            if (message.includes('=== Conviction Analysis ===')) {
-                type = 'conviction';
-                // Format the conviction analysis log
-                message = message.replace(/([\d.]+)/g, '<span class="score">$1</span>')
-                    .replace(/(Conviction:|Overall Tension:|Dominant Speaker:|Analysis:)/g, '<span class="metric">$1</span>');
-                logEntry.innerHTML = message;
-            } else {
-                logEntry.textContent = message;
-            }
+            // Use innerHTML to render HTML tags (like <br>)
+            entry.innerHTML = message;
 
-            logEntry.className = `log-entry ${type}`;
-            logMessages.appendChild(logEntry);
+            logMessages.appendChild(entry);
             logMessages.scrollTop = logMessages.scrollHeight;
         }
 
@@ -400,13 +392,16 @@
             }
 
             if (data.type === 'conviction' && data.message) {
-                // Extract just the scores and dominant speaker from the analysis
-                const lines = data.message.split('\n');
-                const relevantInfo = lines
-                    .filter(line => line.includes('Conviction:') || line.includes('Dominant Speaker:'))
-                    .map(line => line.trim())
-                    .join('\n');
-                log(relevantInfo, 'conviction');
+                // Convert newlines to <br> tags for HTML rendering
+                const formattedMessage = data.message.replace(/\n/g, '<br>');
+                log(formattedMessage, 'conviction');
+                return;
+            }
+
+            // Handle scoring messages with proper line breaks
+            if (data.type === 'score' && data.message) {
+                const formattedScore = data.message.replace(/\n/g, '<br>');
+                log(formattedScore, 'score');
                 return;
             }
 
@@ -416,11 +411,6 @@
 
             if (data.audioUrl) {
                 queueAudio(data.audioUrl, data.agent);
-            }
-
-            if (data.type === 'score' && data.message) {
-                log(data.message, 'score'); // Add new CSS class for scores
-                return;
             }
         }
 
