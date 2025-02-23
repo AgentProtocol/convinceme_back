@@ -292,10 +292,9 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 			// Send score back to user
 			if err := ws.WriteJSON(gin.H{
 				"type": "score",
-				"scores": gin.H{
-					"argument": score,
-				},
-			}); err != nil {
+				"score": score.Average,
+			}); 
+			err != nil {
 				log.Printf("Failed to send score to user: %v", err)
 			}
 		}
@@ -303,7 +302,7 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 
 	// Process agent responses
 	responses := make(map[string]string)
-	scores := make(map[string]*scoring.ArgumentScore)
+	// scores := make(map[string]*scoring.ArgumentScore)
 	var wg sync.WaitGroup
 	var responseMutex sync.Mutex
 
@@ -321,16 +320,16 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 			}
 
 			// Score agent's response
-			var argScore *scoring.ArgumentScore
-			if s.scorer != nil {
-				if score, err := s.scorer.ScoreArgument(ctx, response, msg.Topic); err == nil {
-					argScore = score
-				}
-			}
+			// var argScore *scoring.ArgumentScore
+			// if s.scorer != nil {
+			// 	if score, err := s.scorer.ScoreArgument(ctx, response, msg.Topic); err == nil {
+			// 		argScore = score
+			// 	}
+			// }
 
 			responseMutex.Lock()
 			responses[agentName] = response
-			scores[agentName] = argScore
+			// scores[agentName] = argScore
 			responseMutex.Unlock()
 		}(name, a)
 	}
@@ -339,18 +338,18 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 
 	// Send responses in sequence
 	for name, response := range responses {
-		score := scores[name]
+		// score := scores[name]
 		message := gin.H{
 			"type":    "text",
 			"message": response,
 			"agent":   name,
 		}
 
-		if score != nil {
-			message["scores"] = gin.H{
-				"argument": score,
-			}
-		}
+		// if score != nil {
+		// 	message["scores"] = gin.H{
+		// 		"argument": score,
+		// 	}
+		// }
 
 		if err := ws.WriteJSON(message); err != nil {
 			log.Printf("Failed to send response for %s: %v", name, err)

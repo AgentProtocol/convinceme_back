@@ -49,7 +49,8 @@ Score each aspect from 0-100 and explain why:
 - Truth: Factual accuracy and credibility
 - Humor: Entertainment and engagement value
 
-Return ONLY a JSON object in this format:
+Your response MUST be a valid JSON object with the following structure. Dont write the word json, just output a correct json-formatted object
+:
 {
     "strength": <0-100>,
     "relevance": <0-100>,
@@ -66,6 +67,7 @@ Return ONLY a JSON object in this format:
 
 	completion = strings.TrimSpace(completion)
 	completion = strings.Trim(completion, "`")
+	log.Printf(completion)
 
 	var score ArgumentScore
 	if err := json.Unmarshal([]byte(completion), &score); err != nil {
@@ -76,29 +78,29 @@ Return ONLY a JSON object in this format:
 	score.Average = float64(score.Strength+score.Relevance+score.Logic+score.Truth+score.Humor) / 5.0
 
 	// Print scores
-	log.Printf("\n"+
-		"┏━━━━━━━━━━━━━━━━━━━━ ARGUMENT ANALYSIS ━━━━━━━━━━━━━━━━━━━━┓\n"+
-		"┃ Topic: %-52s ┃\n"+
-		"┃ Argument: %-50s ┃\n"+
-		"┣━━━━━━━━━━━━━━━━━━━━━━━ SCORES ━━━━━━━━━━━━━━━━━━━━━━━━┫\n"+
-		"┃ Strength:  %3d/100  Support for position                    ┃\n"+
-		"┃ Relevance: %3d/100  Conversation fit                        ┃\n"+
-		"┃ Logic:     %3d/100  Reasoning quality                       ┃\n"+
-		"┃ Truth:     %3d/100  Factual accuracy                       ┃\n"+
-		"┃ Humor:     %3d/100  Entertainment value                    ┃\n"+
-		"┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫\n"+
-		"┃ AVERAGE:   %.1f/100                                         ┃\n"+
-		"┃ Analysis: %-51s ┃\n"+
-		"┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n",
-		topic,
-		truncateString(argument, 50),
-		score.Strength,
-		score.Relevance,
-		score.Logic,
-		score.Truth,
-		score.Humor,
-		score.Average,
-		truncateString(score.Explanation, 51))
+	// log.Printf("\n"+
+	// 	"┏━━━━━━━━━━━━━━━━━━━━ ARGUMENT ANALYSIS ━━━━━━━━━━━━━━━━━━━━┓\n"+
+	// 	"┃ Topic: %-52s ┃\n"+
+	// 	"┃ Argument: %-50s ┃\n"+
+	// 	"┣━━━━━━━━━━━━━━━━━━━━━━━ SCORES ━━━━━━━━━━━━━━━━━━━━━━━━┫\n"+
+	// 	"┃ Strength:  %3d/100  Support for position                    ┃\n"+
+	// 	"┃ Relevance: %3d/100  Conversation fit                        ┃\n"+
+	// 	"┃ Logic:     %3d/100  Reasoning quality                       ┃\n"+
+	// 	"┃ Truth:     %3d/100  Factual accuracy                       ┃\n"+
+	// 	"┃ Humor:     %3d/100  Entertainment value                    ┃\n"+
+	// 	"┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┫\n"+
+	// 	"┃ AVERAGE:   %.1f/100                                         ┃\n"+
+	// 	"┃ Analysis: %-51s ┃\n"+
+	// 	"┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\n",
+	// 	topic,
+	// 	truncateString(argument, 50),
+	// 	score.Strength,
+	// 	score.Relevance,
+	// 	score.Logic,
+	// 	score.Truth,
+	// 	score.Humor,
+	// 	score.Average,
+	// 	truncateString(score.Explanation, 51))
 
 	return &score, nil
 }
