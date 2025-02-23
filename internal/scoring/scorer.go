@@ -51,8 +51,6 @@ Score each aspect from 0-100 and explain why:
 - Truth: Factual accuracy and credibility
 - Humor: Entertainment and engagement value
 - Explanation: Brief explanation of scores,
-- Supporting "%s": How much does this support "%s" position (0-100)
-- Supporting "%s": How much does this support "%s" position (0-100)
 
 Your response MUST ONLY be a valid JSON object with the following structure, dont include the word "json", just make it a valid json-formatted object:
 {
@@ -62,8 +60,6 @@ Your response MUST ONLY be a valid JSON object with the following structure, don
     "truth": <0-100>,
     "humor": <0-100>,
     "explanation": "<brief explanation of scores>",
-    "Agent1_support": <0-100>,
-    "Agent2_support": <0-100>
 }`, topic, argument, agent1Name, agent2Name, agent1Name, agent2Name)
 
 	completion, err := s.llm.Call(ctx, prompt)
