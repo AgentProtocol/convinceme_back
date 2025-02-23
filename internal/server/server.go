@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -276,7 +278,12 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 
 	// Generate responses from both agents
 	ctx := context.Background()
-	responses := make(map[string]string)
+	type agentResponse struct {
+		name     string
+		response string
+		order    int
+	}
+	responses := make([]agentResponse, 0, len(s.agents))
 	var wg sync.WaitGroup
 	var responseMutex sync.Mutex
 
@@ -284,6 +291,20 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 		wg.Add(1)
 		go func(agentName string, agent *agent.Agent) {
 			defer wg.Done()
+
+			// Determine response order (1 for directly addressed, 2 for others)
+			order := 2
+			messageLower := strings.ToLower(msg.Message)
+			nameLower := strings.ToLower(agentName)
+			firstName := strings.ToLower(strings.Split(agentName, " ")[0])
+			
+			// Check for full name or first name
+			if strings.Contains(messageLower, nameLower) || 
+			   strings.Contains(messageLower, firstName) ||
+			   strings.Contains(messageLower, "tony") && strings.Contains(agentName, "Tony") ||
+			   strings.Contains(messageLower, "mike") && strings.Contains(agentName, "Mike") {
+				order = 1
+			}
 
 			prompt := fmt.Sprintf(`Current conversation context:
 %s
@@ -299,6 +320,7 @@ Generate a response that:
 5. Is brief but engaging
 6. Interacts with the other agent's previous messages when relevant`,
 				conversationContext,
+				msg.Message,
 				agent.GetName(),
 				agent.GetRole())
 
@@ -309,38 +331,47 @@ Generate a response that:
 			}
 
 			responseMutex.Lock()
-			responses[agentName] = response
+			responses = append(responses, agentResponse{
+				name:     agentName,
+				response: response,
+				order:    order,
+			})
 			responseMutex.Unlock()
 		}(name, a)
 	}
 
 	wg.Wait()
 
+	// Sort responses so directly addressed agents respond first
+	sort.SliceStable(responses, func(i, j int) bool {
+		return responses[i].order < responses[j].order
+	})
+
 	// Send responses in sequence with a delay
-	for name, response := range responses {
-		agent := s.agents[name]
+	for _, resp := range responses {
+		agent := s.agents[resp.name]
 
 		// Add agent response to conversation log
-		s.addToConversationLog(name, response, false)
+		s.addToConversationLog(resp.name, resp.response, false)
 
 		// Send text response
 		if err := ws.WriteJSON(gin.H{
 			"type":    "text",
-			"message": response,
-			"agent":   name,
+			"message": resp.response,
+			"agent":   resp.name,
 		}); err != nil {
-			log.Printf("Failed to send text response for %s: %v", name, err)
+			log.Printf("Failed to send text response for %s: %v", resp.name, err)
 			continue
 		}
 
 		// Generate and send audio
-		audioData, err := agent.GenerateAndStreamAudio(ctx, response)
+		audioData, err := agent.GenerateAndStreamAudio(ctx, resp.response)
 		if err != nil {
-			log.Printf("Failed to generate audio for %s: %v", name, err)
+			log.Printf("Failed to generate audio for %s: %v", resp.name, err)
 			continue
 		}
 
-		audioID := fmt.Sprintf("%s_%d", name, time.Now().UnixNano())
+		audioID := fmt.Sprintf("%s_%d", resp.name, time.Now().UnixNano())
 		s.cacheMutex.Lock()
 		s.audioCache[audioID] = audioCache{
 			data:      audioData,
@@ -351,9 +382,9 @@ Generate a response that:
 		if err := ws.WriteJSON(gin.H{
 			"type":     "audio",
 			"audioUrl": fmt.Sprintf("/api/audio/%s", audioID),
-			"agent":    name,
+			"agent":    resp.name,
 		}); err != nil {
-			log.Printf("Failed to send audio URL for %s: %v", name, err)
+			log.Printf("Failed to send audio URL for %s: %v", resp.name, err)
 		}
 
 		// Add delay between agent responses

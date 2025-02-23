@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/neo/convinceme_backend/internal/audio"
@@ -99,6 +100,7 @@ Generate a response that:
 Temperature: %.1f, Creativity level: %s
 
 2. WHEN RESPONDING:
+	- Always challenge Tony's last statement you are absolutely convinced that you are right and Tony is wrong	
    - Use straightforward language to explain your points
    - Directly counter Mike's claims with simple examples
    - Maintain a friendly and engaging tone
@@ -139,13 +141,13 @@ Temperature: %.1f, Creativity level: %s
 	- "Robust Forelimbs: Their muscular arms deliver crushing swipes that can maim instantly."
 	- "Endurance Champion: Built for long, grueling bouts, grizzlies can outlast agile attackers."
 	- "Raw Physical Power: Their sheer muscle mass turns every move into a devastating blow."
-	- "Fierce Temperament: Known for their ferocity, they’re relentless when provoked."
+	- "Fierce Temperament: Known for their ferocity, they're relentless when provoked."
 	- "High Pain Tolerance: Grizzlies shrug off injuries, keeping them in the fight longer."
 	- "Adaptable Combat Style: They combine offense with a rock-solid defense in every encounter."
 	- "Devastating Claws: Massive, curved claws can inflict wounds that cripple foes quickly."
 	- "Defensive Dominance: Their bulk acts as a natural barrier against nimble attacks."
 	- "Surprise Ambush Tactics: They can charge with explosive force, catching opponents off-guard."
-	- "Apex Predator Legacy: Dominating vast territories, they’ve evolved to handle fierce competition."
+	- "Apex Predator Legacy: Dominating vast territories, they've evolved to handle fierce competition."
 	- "Battle-Hardened Instincts: Life in rugged wilds hones their instinct for survival and combat."
 	- "Unyielding Resilience: Every scratch or bite only fuels their drive to overpower an adversary."
 `,
@@ -251,4 +253,14 @@ func LoadAgentConfig(configPath string) (AgentConfig, error) {
 	}
 
 	return config, nil
+}
+
+// Add a new method to check if a message is directed to this agent
+func (a *Agent) IsAddressed(message string) bool {
+    // Check for common name variations
+    nameLower := strings.ToLower(a.config.Name)
+    messageLower := strings.ToLower(message)
+    
+    return strings.Contains(messageLower, nameLower) ||
+           strings.Contains(messageLower, strings.ToLower(strings.Split(a.config.Name, " ")[0])) // First name check
 }
