@@ -8,6 +8,7 @@ require (
 	github.com/gin-gonic/gin v1.10.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/joho/godotenv v1.5.1
+	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/quic-go/quic-go v0.48.2
 	github.com/sashabaranov/go-openai v1.17.9
 	github.com/tmc/langchaingo v0.1.3

@@ -9,6 +9,9 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"strconv"
+	//"sort"
+	//"strings"
 	"sync"
 	"time"
 
@@ -18,6 +21,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/neo/convinceme_backend/internal/agent"
+	"github.com/neo/convinceme_backend/internal/database"
+	"github.com/neo/convinceme_backend/internal/scoring"
 	"github.com/neo/convinceme_backend/internal/tools"
 )
 
@@ -35,6 +40,9 @@ type Server struct {
 	conversationMutex  sync.RWMutex
 	judge              *tools.ConvictionJudge
 	useHTTPS           bool
+	config             *Config
+	scorer             *scoring.Scorer
+	db                 *database.Database
 	// New fields for continuous discussion
 	isUserConnected bool
 	connectedMutex  sync.RWMutex
@@ -50,6 +58,7 @@ type ConversationEntry struct {
 	Message  string    `json:"message"`
 	Time     time.Time `json:"time"`
 	IsPlayer bool      `json:"is_player"`
+	Topic    string    `json:"topic"`
 }
 
 type ConversationMessage struct {
@@ -71,10 +80,15 @@ var upgrader = websocket.Upgrader{
 	EnableCompression: true,
 }
 
-func NewServer(agents map[string]*agent.Agent, apiKey string, useHTTPS bool) *Server {
+func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey string, useHTTPS bool, config *Config) *Server {
 	judge, err := tools.NewConvictionJudge(apiKey)
 	if err != nil {
 		log.Printf("Warning: Failed to create conviction judge: %v", err)
+	}
+
+	scorer, err := scoring.NewScorer(apiKey)
+	if err != nil {
+		log.Printf("Warning: Failed to initialize scorer: %v", err)
 	}
 
 	router := gin.Default()
@@ -104,6 +118,9 @@ func NewServer(agents map[string]*agent.Agent, apiKey string, useHTTPS bool) *Se
 		conversationLog:   make([]ConversationEntry, 0),
 		judge:             judge,
 		useHTTPS:          useHTTPS,
+		config:            config,
+		scorer:            scorer,
+		db:                db,
 		// Initialize new fields
 		userMessages:   make(chan string, 10),
 		stopDiscussion: make(chan struct{}),
@@ -113,14 +130,26 @@ func NewServer(agents map[string]*agent.Agent, apiKey string, useHTTPS bool) *Se
 	router.GET("/api/audio/:id", server.handleAudioStream)
 	router.POST("/api/conversation/start", server.startConversation)
 	router.POST("/api/stt", audio.HandleSTT)
+	router.GET("/api/agents", server.listAgents)
+	router.GET("/api/arguments", server.getArguments)
+	router.GET("/api/arguments/:id", server.getArgument)
 
 	router.StaticFile("/", "./test.html")
 	router.Static("/static", "./static")
+	router.Static("/hls", "./static/hls")
+
+	router.Use(func(c *gin.Context) {
+		if c.Request.URL.Path[:4] == "/hls" {
+			if len(c.Request.URL.Path) > 5 && c.Request.URL.Path[len(c.Request.URL.Path)-5:] == ".aac" {
+				c.Header("Content-Type", "audio/aac")
+			}
+		}
+	})
 
 	return server
 }
 
-func (s *Server) addToConversationLog(speaker string, message string, isPlayer bool) {
+func (s *Server) addToConversationLog(speaker string, message string, isPlayer bool, topic string) {
 	s.conversationMutex.Lock()
 	defer s.conversationMutex.Unlock()
 
@@ -129,6 +158,7 @@ func (s *Server) addToConversationLog(speaker string, message string, isPlayer b
 		Message:  message,
 		Time:     time.Now(),
 		IsPlayer: isPlayer,
+		Topic:    topic,
 	}
 	s.conversationLog = append(s.conversationLog, entry)
 }
@@ -305,13 +335,30 @@ func (s *Server) getNextAgent() *agent.Agent {
 	return nil
 }
 
-func getPrompt(promptType string) string {
-	switch promptType {
-	case "player_message":
-		return `You are participating in a structured debate about whether bears or tigers are the superior predator.
+func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage) {
+	// Add player message to conversation log
+	s.addToConversationLog("Player", msg.Message, true)
+
+	// Get conversation context
+	conversationContext := s.getConversationContext()
+
+	// Generate responses from both agents
+	ctx := context.Background()
+	responses := make(map[string]string)
+	var wg sync.WaitGroup
+	var responseMutex sync.Mutex
+
+	for name, a := range s.agents {
+		wg.Add(1)
+		go func(agentName string, agent *agent.Agent) {
+			defer wg.Done()
+
+			prompt := fmt.Sprintf(`You are participating in a structured debate about whether bears or tigers are the superior predator.
 
 Current conversation context:
 %s
+
+A player has just said: "%s"
 
 You are %s, with the role of %s.
 Remember:
@@ -404,7 +451,7 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 
 			// Time the response generation
 			responseStart := time.Now()
-			response, err := agent.GenerateResponse(ctx, "Bear vs Tiger Debate", prompt)
+			response, err := agent.GenerateResponse(ctx, topic, prompt)
 			responseGenerationTime := time.Since(responseStart)
 			if err != nil {
 				log.Printf("Failed to generate response: %v", err)
@@ -412,7 +459,7 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 			}
 
 			// Add response to conversation log
-			s.addToConversationLog(agent.GetName(), response, false)
+			s.addToConversationLog(agent.GetName(), response, false, topic)
 
 			// Send text response
 			if err := ws.WriteJSON(gin.H{
@@ -509,6 +556,30 @@ func (s *Server) listAgents(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"agents": agents,
 	})
+}
+
+func (s *Server) getArguments(c *gin.Context) {
+	arguments, err := s.db.GetAllArguments()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"arguments": arguments})
+}
+
+func (s *Server) getArgument(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid argument ID"})
+		return
+	}
+
+	argument, err := s.db.GetArgumentWithScore(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, argument)
 }
 
 func (s *Server) Run(addr string) error {

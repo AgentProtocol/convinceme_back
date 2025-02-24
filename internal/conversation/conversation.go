@@ -20,7 +20,7 @@ type ConversationConfig struct {
 	MaxTurns        int
 	TurnDelay       time.Duration
 	ResponseStyle   types.ResponseStyle
-	MaxTokens       int
+	MaxCompletionTokens       int
 	TemperatureHigh bool
 }
 
@@ -31,7 +31,7 @@ func DefaultConfig() ConversationConfig {
 		MaxTurns:        5,
 		TurnDelay:       500 * time.Millisecond,      // Reduced delay to 500 milliseconds
 		ResponseStyle:   types.ResponseStyleHumorous, // Set to humorous for more emotional responses
-		MaxTokens:       100,
+		MaxCompletionTokens:       100,
 		TemperatureHigh: true,
 	}
 }

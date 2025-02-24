@@ -19,9 +19,32 @@ type Tool interface {
 type ConvictionMetrics struct {
 	Agent1Score     float64 `json:"agent1_score"`     // 0-1 conviction score for agent1
 	Agent2Score     float64 `json:"agent2_score"`     // 0-1 conviction score for agent2
+	Agent1Name      string  `json:"agent1_name"`      // Name of agent1
+    Agent2Name      string  `json:"agent2_name"`      // Name of agent2
 	OverallTension  float64 `json:"overall_tension"`  // 0-1 tension level between agents
 	DominantAgent   string  `json:"dominant_agent"`   // Name of the agent showing more conviction
 	AnalysisSummary string  `json:"analysis_summary"` // Brief analysis of the conviction dynamics
+}
+
+// ConvictionContext represents the input context for conviction analysis
+type ConvictionContext struct {
+	Agent1Name      string             `json:"agent1_name"`
+	Agent2Name      string             `json:"agent2_name"`
+	Conversation    []ConversationEntry `json:"conversation"`
+	UserArgument    string             `json:"user_argument"`
+	UserScore       *ArgumentScore     `json:"user_score"`
+	InitialMetrics  ConvictionMetrics  `json:"initial_metrics"`
+}
+
+// ArgumentScore represents the scoring metrics for an argument
+type ArgumentScore struct {
+	Strength    int     `json:"strength"`    // Support for position (0-100)
+	Relevance   int     `json:"relevance"`   // Relevance to discussion (0-100)
+	Logic       int     `json:"logic"`       // Logical structure (0-100)
+	Truth       int     `json:"truth"`       // Factual accuracy (0-100)
+	Humor       int     `json:"humor"`       // Entertainment value (0-100)
+	Average     float64 `json:"average"`     // Average of all scores
+	Explanation string  `json:"explanation"` // Brief explanation
 }
 
 // ConversationEntry represents a single message in the conversation

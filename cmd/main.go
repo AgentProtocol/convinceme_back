@@ -4,11 +4,13 @@ import (
 	"context"
 	"log"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/neo/convinceme_backend/internal/agent"
 	"github.com/neo/convinceme_backend/internal/conversation"
+	"github.com/neo/convinceme_backend/internal/database"
 	"github.com/neo/convinceme_backend/internal/player"
 	"github.com/neo/convinceme_backend/internal/server"
 	"github.com/neo/convinceme_backend/internal/types"
@@ -31,23 +33,28 @@ func main() {
 	// Check if HTTPS should be used
 	useHTTPS := os.Getenv("USE_HTTPS") == "true"
 
-	// Create agent configurations
-	agent1Config := agent.AgentConfig{
-		Name:        "Bear Expert",
-		Role:        "Wildlife biologist specializing in bears, passionate advocate for bears' superiority. Expert in ursine behavior, physiology, and hunting patterns. Has spent 15 years studying bears in their natural habitat and strongly believes they are the ultimate apex predators.",
-		Voice:       types.VoiceFable,
-		Temperature: 1.5, // Higher temperature for more emotional responses
-		MaxTokens:   150,
-		TopP:        0.9,
+	// Initialize database
+	db, err := database.New("data")
+	if err != nil {
+		logger.Fatalf("Failed to initialize database: %v", err)
+	}
+	defer db.Close()
+
+	// Ensure HLS directory exists
+	hlsDir := filepath.Join("static", "hls")
+	if err := os.MkdirAll(hlsDir, 0755); err != nil {
+		logger.Fatalf("Failed to create HLS directory: %v", err)
 	}
 
-	agent2Config := agent.AgentConfig{
-		Name:        "Tiger Specialist",
-		Role:        "Big cat researcher and tiger conservation expert. Has studied tigers across Asia for 20 years, documenting their hunting techniques and physical capabilities. Firmly believes tigers are nature's perfect predators.",
-		Voice:       types.VoiceOnyx,
-		Temperature: 1.5, // Higher temperature for more emotional responses
-		MaxTokens:   150,
-		TopP:        0.9,
+	// Load agent configurations from JSON files
+	agent1Config, err := agent.LoadAgentConfig("internal/agent/grizzly.json")
+	if err != nil {
+		logger.Fatalf("Failed to load grizzly config: %v", err)
+	}
+
+	agent2Config, err := agent.LoadAgentConfig("internal/agent/tiger.json")
+	if err != nil {
+		logger.Fatalf("Failed to load tiger config: %v", err)
 	}
 
 	// Create agents
@@ -65,25 +72,15 @@ func main() {
 	inputHandler := player.NewInputHandler(logger)
 
 	// Define the debate topic with explicit initial context
-	commonTopic := `Bear vs Tiger: Who is the superior predator?
+	commonTopic := "Grizzly bears vs Tigers - who would win a fight?"
 
-Key points to debate:
-- Physical strength and combat abilities
-- Hunting success rates and techniques
-- Territorial dominance
-- Survival skills and adaptability
-- Historical encounters and documented fights
-- Biological advantages and disadvantages
-
-The debate should focus on factual evidence while acknowledging the passion each expert has for their respective species.`
-
-	// Create conversation configuration with the common topic
+	// Create conversation configuration
 	convConfig := conversation.ConversationConfig{
 		Topic:           commonTopic,
-		MaxTurns:        10, // Increased turns for more detailed debate
+		MaxTurns:        10,
 		TurnDelay:       500 * time.Millisecond,
 		ResponseStyle:   types.ResponseStyleDebate, // Changed to debate style
-		MaxTokens:       150,                       // Increased tokens for more detailed responses
+		MaxCompletionTokens:       150,                       // Increased tokens for more detailed responses
 		TemperatureHigh: true,
 	}
 
@@ -96,14 +93,17 @@ The debate should focus on factual evidence while acknowledging the passion each
 		agent2Config.Name: agent2,
 	}
 
-	// Create and start the server
-	srv := server.NewServer(agents, apiKey, useHTTPS)
-	if useHTTPS {
-		logger.Println("Starting HTTPS server with HTTP/3 support on :8080...")
-	} else {
-		logger.Println("Starting HTTP server on :8080...")
+	// Create server configuration
+	serverConfig := &server.Config{
+		Port:          ":8080",
+		OpenAIKey:     apiKey,
+		ResponseDelay: 500,
 	}
-	if err := srv.Run(":8080"); err != nil {
+
+	// Create and start the server
+	srv := server.NewServer(agents, db, apiKey, useHTTPS, serverConfig)
+	logger.Printf("Starting server on %s...", serverConfig.Port)
+	if err := srv.Run(serverConfig.Port); err != nil {
 		logger.Fatalf("Server failed: %v", err)
 	}
 
