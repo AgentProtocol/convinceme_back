@@ -387,12 +387,13 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 
 				// Send the complete argument with score through WebSocket
 				argument := database.Argument{
-					ID:       argID,
-					PlayerID: msg.PlayerID,
-					Topic:    msg.Topic,
-					Content:  msg.Message,
-					Side:     side,
-					Score:    score,
+					ID:        argID,
+					PlayerID:  msg.PlayerID,
+					Topic:     msg.Topic,
+					Content:   msg.Message,
+					Side:      side,
+					Score:     score,
+					CreatedAt: time.Now().Format(time.RFC3339),
 				}
 
 				log.Printf("Sending argument data through WebSocket: %+v", argument)
