@@ -388,7 +388,7 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 					score.Truth,
 					score.Humor,
 					score.Average,
-					score.Agent1_support,
+					score.Agent1_support, // what is the chance that this argument is for the bear/tiger
 					score.Agent2_support,
 					score.Explanation),
 			}); err != nil {
@@ -751,6 +751,15 @@ func (s *Server) analyzeConviction(ctx context.Context, ws *websocket.Conn) {
 	if err := json.Unmarshal([]byte(metricsJSON), &metrics); err != nil {
 		log.Printf("Warning: Failed to parse conviction metrics: %v", err)
 		return
+	}
+
+	// Update conviction scores for each agent
+	for name, agent := range s.agents {
+		if name == metrics.Agent1Name {
+			agent.UpdateConvictionScore(metrics.Agent1Score)
+		} else if name == metrics.Agent2Name {
+			agent.UpdateConvictionScore(metrics.Agent2Score)
+		}
 	}
 
 	analysisText := fmt.Sprintf("\n=== Conviction Analysis ===\n"+

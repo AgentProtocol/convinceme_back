@@ -145,7 +145,7 @@ func (c *ConvictionJudge) Call(ctx context.Context, input string) (string, error
 	resp, err := c.client.CreateChatCompletion(
 		ctx,
 		openai.ChatCompletionRequest{
-			Model:       openai.GPT4,
+			Model:       openai.GPT3Dot5Turbo,
 			Messages:    messages,
 			Temperature: 0.2, // Low temperature for more consistent analysis
 		},

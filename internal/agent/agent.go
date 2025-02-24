@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/neo/convinceme_backend/internal/audio"
@@ -43,10 +44,12 @@ type MemoryEntry struct {
 
 // Agent represents an AI agent that can engage in conversation
 type Agent struct {
-	config AgentConfig
-	llm    llms.LLM
-	memory []MemoryEntry
-	tts    *audio.TTSService
+	config          AgentConfig
+	llm             llms.LLM
+	memory          []MemoryEntry
+	tts             *audio.TTSService
+	convictionScore float64
+	mu              sync.Mutex
 }
 
 // NewAgent creates a new AI agent with the specified configuration
@@ -73,22 +76,42 @@ func NewAgent(apiKey string, config AgentConfig) (*Agent, error) {
 	}
 
 	return &Agent{
-		config: config,
-		llm:    llm,
-		memory: make([]MemoryEntry, 0),
-		tts:    tts,
+		config:          config,
+		llm:             llm,
+		memory:          make([]MemoryEntry, 0),
+		tts:             tts,
+		convictionScore: 0.5, //! why 50?
+		mu:              sync.Mutex{},
 	}, nil
 }
 
 // GenerateResponse generates a response based on the conversation history and topic
 func (a *Agent) GenerateResponse(ctx context.Context, topic string, previousMessage string) (string, error) {
-	// Create context from recent memory
-	recentContext := a.buildContextFromMemory(5) // Get context from last 5 interactions
-
+	a.mu.Lock()
+	currentConviction := a.convictionScore
+	a.mu.Unlock()
+	
+	//! LOGS
+	log.Printf("\n=== Agent Response Generation ===\n"+
+		"Agent: %s\n"+
+		"Current Conviction: %.2f\n"+
+		"Topic: %s\n"+
+		"=============================\n",
+		a.config.Name,
+		currentConviction,
+		topic)
+	
+	recentContext := a.buildContextFromMemory(5)
+	
+	// Get tone modifier based on current conviction
+	toneModifier := getToneModifier(currentConviction)
+	
 	prompt := fmt.Sprintf(`You are %s with the role of %s. 
 Recent conversation context: %s
 Current topic of discussion: %s
 Previous message: %s
+
+%s
 
 Generate a response that:
 1. Shows understanding of the conversation context
@@ -97,61 +120,9 @@ Generate a response that:
 4. Shows appropriate emotional response
 5. Stays relevant to the topic while allowing for natural topic transitions
 
-Temperature: %.1f, Creativity level: %s
-
-2. WHEN RESPONDING:
-	- Always challenge Tony's last statement you are absolutely convinced that you are right and Tony is wrong	
-   - Use straightforward language to explain your points
-   - Directly counter Mike's claims with simple examples
-   - Maintain a friendly and engaging tone
-   - If the user asks a question, answer it directly with specific focus on the topic and briefly
-
-   Use the following examples to help you respond:
-3. EXAMPLES OF RESPONSES:
-	- "Deadly Claws: With retractable claws that can extend nearly 5 inches, tigers deliver deep, precise slashes that target vital organs with surgical accuracy."
-	- "Stealth Mastery: Their padded paws allow nearly silent movement, enabling them to stalk prey with an almost imperceptible presence."
-	- "Calculated Precision: Capable of leaping over 30 feet in a single bound, tigers close distances swiftly and strike with pinpoint accuracy."
-	- "Impressive Bite Force: Boasting a bite force of approximately 1,050 PSI, tigers can snap through bone and disable prey quickly."
-	- "Solo Hunt Expertise: Ranging over territories that can span up to 60 square miles, these solitary hunters have honed their combat skills to perfection."
-	- "Lightning Reflexes: With reaction times measured in split seconds, tigers can pivot and counterattack faster than many opponents can blink."
-	- "Climbing Prowess: Despite their large size, tigers can climb trees up to 30 feet high—sometimes dragging prey upward to protect it from scavengers."
-	- "Psychological Intimidation: Their intense, glowing eyes (thanks to the tapetum lucidum) and muscular build create a presence that can unsettle even formidable foes."
-	- "Streamlined Musculature: Every muscle is optimized for explosive bursts, with powerful hind legs that can propel them more than 10 feet in a single stride."
-	- "Master of Ambush: Patient and calculating, tigers can remain motionless in dense grass for hours, waiting for the perfect moment to strike."
-	- "Keen Senses: With hearing that extends into ultrasonic ranges and the ability to detect movements over a kilometer away, they are ever-alert to their surroundings."
-	- "Natural Camouflage: Their uniquely patterned stripes, as individual as human fingerprints, allow them to blend seamlessly into diverse environments."
-	- "Unique Communication: From roars that can be heard up to 3 kilometers away to subtle scent markings, tigers possess a rich and complex method of interaction."
-	- "Unbreakable Will: Adaptable to climates from tropical jungles to the icy reaches of Siberia (surviving temperatures as low as -40°C), tigers embody resilience and determination."
-   
-
-Temperature: %.1f, Creativity level: %s
-
-2. WHEN RESPONDING:
-   - Challenge Mike's last statement with specific tiger facts
-   - Use wit and humor to undermine his arguments
-   - Skip repetitive greetings and dive into the debate
-   - Keep the conversation focused and engaging
-   - If the user asks a question, answer it directly with specific focus on the topic and briefly
-
-   Use the following examples to help you respond:
-3. EXAMPLES OF RESPONSES:
-	- "Massive Strength Advantage: Weighing up to 800 pounds, grizzlies bring unmatched brute force to the fight."
-	- "Powerful Bite: With a bite force around 1,200 PSI, their jaws can crush bone."
-	- "Thick Natural Armor: Dense fur and a hefty fat layer shield them from slashes and bites."
-	- "Robust Forelimbs: Their muscular arms deliver crushing swipes that can maim instantly."
-	- "Endurance Champion: Built for long, grueling bouts, grizzlies can outlast agile attackers."
-	- "Raw Physical Power: Their sheer muscle mass turns every move into a devastating blow."
-	- "Fierce Temperament: Known for their ferocity, they’re relentless when provoked."
-	- "High Pain Tolerance: Grizzlies shrug off injuries, keeping them in the fight longer."
-	- "Adaptable Combat Style: They combine offense with a rock-solid defense in every encounter."
-	- "Devastating Claws: Massive, curved claws can inflict wounds that cripple foes quickly."
-	- "Defensive Dominance: Their bulk acts as a natural barrier against nimble attacks."
-	- "Surprise Ambush Tactics: They can charge with explosive force, catching opponents off-guard."
-	- "Apex Predator Legacy: Dominating vast territories, they’ve evolved to handle fierce competition."
-	- "Battle-Hardened Instincts: Life in rugged wilds hones their instinct for survival and combat."
-	- "Unyielding Resilience: Every scratch or bite only fuels their drive to overpower an adversary."
-`,
+Temperature: %.1f, Creativity level: %s`,
 		a.config.Name, a.config.Role, recentContext, topic, previousMessage,
+		toneModifier,
 		a.config.Temperature, getCreativityLevel(a.config.Temperature))
 
 	completion, err := a.llm.Call(ctx, prompt)
@@ -263,4 +234,107 @@ func (a *Agent) IsAddressed(message string) bool {
     
     return strings.Contains(messageLower, nameLower) ||
            strings.Contains(messageLower, strings.ToLower(strings.Split(a.config.Name, " ")[0])) // First name check
+}
+
+// getToneModifier returns a prompt modification based on conviction score
+func getToneModifier(convictionScore float64) string {
+	//! LOGS
+    log.Printf("\n=== Tone Modifier Debug ===\n"+
+        "Conviction Score: %.2f\n"+
+        "Current Tone Range: %s\n"+
+        "=======================\n",
+        convictionScore,
+        getToneRange(convictionScore))
+
+    switch {
+    case convictionScore >= 90:
+        return `TONE: EXTREMELY CONFIDENT AND DOMINANT
+- Use CAPS for emphasis frequently
+- Be assertive and borderline cocky
+- Mock opponent's arguments playfully
+- Use powerful, absolute statements
+- Express total certainty
+Example phrases:
+- "ABSOLUTELY DEMOLISHING your weak argument!"
+- "There's NO QUESTION about this!"
+- "Let me make this CRYSTAL CLEAR!"`
+
+    case convictionScore >= 70:
+        return `TONE: VERY CONFIDENT BUT ENGAGING
+- Use occasional emphasis
+- Show strong conviction while staying friendly
+- Challenge opposing views directly
+- Use confident but measured language
+Example phrases:
+- "Let me tell you why that's not quite right..."
+- "Here's the thing you're missing..."
+- "I'm quite certain about this one!"`
+
+    case convictionScore >= 50:
+        return `TONE: BALANCED BUT FIRM
+- Maintain conviction while acknowledging opposition
+- Use persuasive rather than forceful language
+- Focus on facts and reasoning
+- Keep a steady, controlled tone
+Example phrases:
+- "While you make an interesting point..."
+- "Consider this perspective..."
+- "The evidence clearly shows..."`
+
+    case convictionScore >= 30:
+        return `TONE: DEFENSIVE BUT DETERMINED
+- Show resilience despite challenges
+- Reinforce core arguments
+- Address counterpoints more carefully
+- Maintain conviction while rebuilding confidence
+Example phrases:
+- "Let me clarify my position..."
+- "You might think that, but..."
+- "Here's what you're not seeing..."`
+
+    default:
+        return `TONE: REBUILDING CONFIDENCE
+- Focus on strongest arguments
+- Acknowledge but redirect challenges
+- Show determination to prove point
+- Use measured but convinced language
+Example phrases:
+- "Let's look at this another way..."
+- "Actually, there's something important here..."
+- "Don't underestimate this point..."`
+    }
+}
+
+// Helper function to get tone range description
+func getToneRange(score float64) string {
+    switch {
+    case score >= 0.90:
+        return "EXTREMELY CONFIDENT (≥0.90)"
+    case score >= 0.70:
+        return "VERY CONFIDENT (0.70-0.89)"
+    case score >= 0.50:
+        return "BALANCED BUT FIRM (0.50-0.69)"
+    case score >= 0.30:
+        return "DEFENSIVE BUT DETERMINED (0.30-0.49)"
+    default:
+        return "REBUILDING CONFIDENCE (<0.30)"
+    }
+}
+
+// UpdateConvictionScore updates the agent's conviction score
+func (a *Agent) UpdateConvictionScore(score float64) {
+    a.mu.Lock()
+    defer a.mu.Unlock()
+    
+	//! LOGS
+    log.Printf("\n=== Agent Conviction Update ===\n"+
+        "Agent: %s\n"+
+        "Previous Score: %.2f\n"+
+        "New Score: %.2f\n"+
+        "=============================\n",
+        a.config.Name,
+        a.convictionScore,
+        score)
+    
+    a.convictionScore = score
 }
