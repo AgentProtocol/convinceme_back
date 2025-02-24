@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -27,7 +26,6 @@ import (
 	"github.com/neo/convinceme_backend/internal/agent"
 	"github.com/neo/convinceme_backend/internal/database"
 	"github.com/neo/convinceme_backend/internal/scoring"
-	"github.com/neo/convinceme_backend/internal/tools"
 )
 
 type Server struct {
@@ -42,7 +40,6 @@ type Server struct {
 	agentMutex         sync.RWMutex
 	conversationLog    []ConversationEntry
 	conversationMutex  sync.RWMutex
-	judge              *tools.ConvictionJudge
 	useHTTPS           bool
 	config             *Config
 	scorer             *scoring.Scorer
@@ -52,11 +49,11 @@ type Server struct {
 	connectedMutex  sync.RWMutex
 	userMessages    chan string
 	stopDiscussion  chan struct{}
+	lastAudioStart  time.Time
+	requiredDelay   time.Duration
 	// Field to track pending user message
 	pendingUserMessage     string
 	pendingUserMessageLock sync.RWMutex
-	lastAudioStart         time.Time
-	requiredDelay          time.Duration
 }
 
 type ConversationEntry struct {
@@ -87,22 +84,17 @@ var upgrader = websocket.Upgrader{
 	EnableCompression: true,
 }
 
-
 // Define constants for agent roles
 const (
 	TIGER_AGENT = "Tony 'The Tiger King' Chen"
 	BEAR_AGENT  = "Mike 'Grizzly' Johnson"
-	MAX_SCORE = 200
+	MAX_SCORE   = 200
 )
 
-var gameScore int  = MAX_SCORE/2;
-
+var agent1Score int = MAX_SCORE / 2
+var agent2Score int = MAX_SCORE / 2
 
 func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey string, useHTTPS bool, config *Config) *Server {
-	judge, err := tools.NewConvictionJudge(apiKey)
-	if err != nil {
-		log.Printf("Warning: Failed to create conviction judge: %v", err)
-	}
 
 	scorer, err := scoring.NewScorer(apiKey)
 	if err != nil {
@@ -134,7 +126,6 @@ func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey str
 		audioCache:        make(map[string]audioCache),
 		lastPlayerMessage: time.Now(),
 		conversationLog:   make([]ConversationEntry, 0),
-		judge:             judge,
 		useHTTPS:          useHTTPS,
 		config:            config,
 		scorer:            scorer,
@@ -153,6 +144,7 @@ func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey str
 	router.GET("/api/agents", server.listAgents)
 	router.GET("/api/arguments", server.getArguments)
 	router.GET("/api/arguments/:id", server.getArgument)
+	router.GET("/api/gameScore", server.getGameScore)
 
 	router.StaticFile("/", "./test.html")
 	router.Static("/static", "./static")
@@ -363,18 +355,9 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 	ctx := context.Background()
 
 	// Get agent names
-	// var agent1Name, agent2Name string
 	agent1Name, agent2Name := s.GetOrderedAgentNames()
 
 	log.Printf("\n-------------->agent1Name is %s, agent2Name is %s\n", agent1Name, agent2Name)
-	// for name := range s.agents {
-	// 	if agent1Name == "" {
-	// 		agent1Name = name
-	// 	} else {
-	// 		agent2Name = name
-	// 		break
-	// 	}
-	// }
 
 	// Score the user's message first
 	if s.scorer != nil {
@@ -476,32 +459,26 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 				agent1Name,
 				agent2Name,
 				score.Explanation)
-				}
+		}
 
-			delta, winner := decidePlayerVote(score.Agent1_support, score.Agent2_support, agent1Name, agent2Name)
-			if (winner == agent1Name) {
-				gameScore = gameScore - delta
-			}
-			if (winner == agent2Name) {
-				gameScore = gameScore + delta
-			}
-			log.Printf("%s scored %d points ", winner, delta);
-			log.Printf("==================Gamescore is %d ====================", gameScore);
+		delta, winner := decidePlayerVote(score.Agent1_support, score.Agent2_support, agent1Name, agent2Name)
+		if winner == agent1Name {
+			agent1Score = agent1Score + delta
+			agent2Score = agent2Score - delta
+		}
+		if winner == agent2Name {
+			agent2Score = agent2Score + delta
+			agent1Score = agent1Score - delta
+		}
+		log.Printf("%s scored %d points ", winner, delta)
 
-			if (gameScore <= 0 || gameScore >= 200) {
-				log.Printf("=================================================================");
-				log.Printf("=================================================================");
-				log.Printf("===========================%s won !!!!!!!!!! ====================", winner);
-				log.Printf("=================================================================");
-				log.Printf("=================================================================");
-			}
-			delta = 0
-			winner = ""
-
-
-			// _, _, := decidePlayerVote(score.Agent1_support, score.Agent2_support, agent1Name, agent2Name)
-
-
+		ws.WriteJSON(gin.H{
+			"type": "game_score",
+			"gameScore": gin.H{
+				agent1Name: agent1Score,
+				agent2Name: agent2Score,
+			},
+		})
 	}
 }
 
@@ -632,9 +609,6 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 				return
 			}
 
-			// After each agent response
-			s.analyzeConviction(context.Background(), ws)
-
 			// Time the audio generation
 			audioStart := time.Now()
 			audioData, err := agent.GenerateAndStreamAudio(ctx, response)
@@ -741,6 +715,14 @@ func (s *Server) getArgument(c *gin.Context) {
 	c.JSON(http.StatusOK, argument)
 }
 
+func (s *Server) getGameScore(c *gin.Context) {
+	agent1Name, agent2Name := s.GetOrderedAgentNames()
+	c.JSON(http.StatusOK, gin.H{
+		agent1Name: agent1Score,
+		agent2Name: agent2Score,
+	})
+}
+
 func (s *Server) Run(addr string) error {
 	if s.useHTTPS {
 		return s.runHTTPS(addr)
@@ -779,91 +761,6 @@ func (s *Server) runHTTPS(addr string) error {
 
 	// Start the HTTP/1.1 and HTTP/2 server
 	return srv.ListenAndServeTLS("cert.pem", "key.pem")
-}
-
-func (s *Server) analyzeConviction(ctx context.Context, ws *websocket.Conn) {
-	if s.judge == nil {
-		return
-	}
-
-	s.conversationMutex.RLock()
-	if len(s.conversationLog) < 2 {
-		s.conversationMutex.RUnlock()
-		return
-	}
-
-	// Convert server conversation log to judge's format
-	judgeConversation := make([]tools.ConversationEntry, 0, len(s.conversationLog))
-	for _, entry := range s.conversationLog {
-		if !entry.IsPlayer { // Only include agent messages
-			judgeConversation = append(judgeConversation, tools.ConversationEntry{
-				Speaker: entry.Speaker,
-				Message: entry.Message,
-			})
-		}
-	}
-
-	// Get agent names
-	var agent1Name, agent2Name string
-	for name := range s.agents {
-		if agent1Name == "" {
-			agent1Name = name
-		} else {
-			agent2Name = name
-			break
-		}
-	}
-	s.conversationMutex.RUnlock()
-
-	conversationData := map[string]interface{}{
-		"agent1_name":  agent1Name,
-		"agent2_name":  agent2Name,
-		"conversation": judgeConversation,
-	}
-
-	conversationJSON, err := json.Marshal(conversationData)
-	if err != nil {
-		log.Printf("Warning: Failed to marshal conversation data: %v", err)
-		return
-	}
-
-	metricsJSON, err := s.judge.Call(ctx, string(conversationJSON))
-	if err != nil {
-		log.Printf("Warning: Failed to analyze conviction: %v", err)
-		return
-	}
-
-	var metrics tools.ConvictionMetrics
-	if err := json.Unmarshal([]byte(metricsJSON), &metrics); err != nil {
-		log.Printf("Warning: Failed to parse conviction metrics: %v", err)
-		return
-	}
-
-	analysisText := fmt.Sprintf("\n=== Conviction Analysis ===\n"+
-		"%s Conviction: %.2f\n"+
-		"%s Conviction: %.2f\n"+
-		"Overall Tension: %.2f\n"+
-		"Dominant Speaker: %s\n"+
-		"Analysis: %s\n"+
-		"========================\n",
-		agent1Name, metrics.Agent1Score,
-		agent2Name, metrics.Agent2Score,
-		metrics.OverallTension,
-		metrics.DominantAgent,
-		metrics.AnalysisSummary)
-
-	// Log to server console
-	log.Print(analysisText)
-
-	// Send to frontend through WebSocket
-	if ws != nil {
-		if err := ws.WriteJSON(gin.H{
-			"type":    "conviction",
-			"message": metricsJSON,
-		}); err != nil {
-			log.Printf("Failed to send conviction analysis: %v", err)
-		}
-	}
 }
 
 // getAudioDuration calculates the duration of MP3 audio data by parsing MP3 frames
