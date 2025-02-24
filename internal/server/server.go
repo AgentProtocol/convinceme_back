@@ -56,7 +56,7 @@ type Server struct {
 	pendingUserMessage     string
 	pendingUserMessageLock sync.RWMutex
 	lastAudioStart         time.Time
-	lastAudioDuration      time.Duration
+	requiredDelay          time.Duration
 }
 
 type ConversationEntry struct {
@@ -131,6 +131,8 @@ func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey str
 		// Initialize new fields
 		userMessages:   make(chan string, 10),
 		stopDiscussion: make(chan struct{}),
+		lastAudioStart: time.Now(),
+		requiredDelay:  0,
 	}
 
 	router.GET("/ws/conversation", server.handleConversationWebSocket)
@@ -530,11 +532,10 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 		default:
 			// Check if enough time has passed since last audio
 			timeSinceLastAudio := time.Since(s.lastAudioStart)
-			requiredDelay := s.lastAudioDuration
 
-			if timeSinceLastAudio < requiredDelay {
+			if timeSinceLastAudio < s.requiredDelay {
 				isfirstmessage = false
-				waitTime := requiredDelay - timeSinceLastAudio
+				waitTime := s.requiredDelay - timeSinceLastAudio
 				log.Printf("Waiting %v before next message", waitTime)
 				time.Sleep(waitTime)
 			}
@@ -626,7 +627,7 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 				responseGenerationTime,
 				audioGenerationTime,
 				totalGenerationTime)
-
+			log.Printf("Is first message: %v", isfirstmessage)
 			// Calculate delay
 			buffer := time.Duration(math.Min(audioDuration.Seconds()*0.2, 1.0)) * time.Second
 			remainingDelay := audioDuration + buffer
@@ -638,7 +639,7 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 			log.Printf("Total generation time: %v", totalGenerationTime)
 			// After sending audio URL, update timing information
 			s.lastAudioStart = time.Now()
-			s.lastAudioDuration = remainingDelay
+			s.requiredDelay = remainingDelay
 		}
 	}
 }
