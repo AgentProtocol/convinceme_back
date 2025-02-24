@@ -55,6 +55,8 @@ type Server struct {
 	// Field to track pending user message
 	pendingUserMessage     string
 	pendingUserMessageLock sync.RWMutex
+	lastAudioStart         time.Time
+	lastAudioDuration      time.Duration
 }
 
 type ConversationEntry struct {
@@ -526,6 +528,17 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 		case <-s.stopDiscussion:
 			return
 		default:
+			// Check if enough time has passed since last audio
+			timeSinceLastAudio := time.Since(s.lastAudioStart)
+			requiredDelay := s.lastAudioDuration
+
+			if timeSinceLastAudio < requiredDelay {
+				isfirstmessage = false
+				waitTime := requiredDelay - timeSinceLastAudio
+				log.Printf("Waiting %v before next message", waitTime)
+				time.Sleep(waitTime)
+			}
+
 			// Start timing the entire generation process
 			generationStart := time.Now()
 
@@ -623,13 +636,9 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 			}
 			log.Printf("Remaining delay: %v", remainingDelay)
 			log.Printf("Total generation time: %v", totalGenerationTime)
-			// Only sleep if we need to wait more
-			if remainingDelay > 0 {
-				log.Printf("Waiting for %v before next message", remainingDelay)
-				time.Sleep(remainingDelay)
-			} else {
-				log.Printf("No delay needed, generation difference exceeds audio duration")
-			}
+			// After sending audio URL, update timing information
+			s.lastAudioStart = time.Now()
+			s.lastAudioDuration = remainingDelay
 		}
 	}
 }
