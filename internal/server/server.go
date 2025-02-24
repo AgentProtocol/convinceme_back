@@ -301,10 +301,10 @@ func (s *Server) getNextAgent() *agent.Agent {
 
 func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage) {
 	// Add player message to conversation log
-	s.addToConversationLog("Player", msg.Message, true)
+	s.addToConversationLog("Player", msg.Message, true, msg.Topic)
 
 	// // Get conversation context
-	conversationContext := s.getConversationContext()
+	//conversationContext := s.getConversationContext()
 
 	// Generate responses from both agents
 	ctx := context.Background()
