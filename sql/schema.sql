@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS arguments (
     player_id TEXT NOT NULL,  -- Identifier for the player
     topic TEXT NOT NULL,      -- Topic of the argument
     content TEXT NOT NULL,    -- The actual argument text
+    side TEXT NOT NULL,       -- Which side the argument supports
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -20,4 +21,4 @@ CREATE TABLE IF NOT EXISTS scores (
     explanation TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (argument_id) REFERENCES arguments(id) ON DELETE CASCADE
-); 
+);

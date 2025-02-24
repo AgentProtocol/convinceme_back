@@ -418,6 +418,12 @@
                 return;
             }
 
+            if (data.type === 'argument') {
+                const argument = data.argument;
+                log(`Argument Analysis:\nSide: ${argument.Side}\nScore: ${argument.Score.Average.toFixed(1)}/100\nStrength: ${argument.Score.Strength}/100\nLogic: ${argument.Score.Logic}/100`, 'argument');
+                return;
+            }
+
             if (data.type === 'score' && data.message) {
                 // Extract scores using regex
                 const avgMatch = data.message.match(/Average:\s*([\d.]+)/);

@@ -336,6 +336,7 @@ func (s *Server) getNextAgent() *agent.Agent {
 
 func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage) {
 	// Add player message to conversation log
+	log.Printf("Received WebSocket message: %+v", msg)
 	s.addToConversationLog("Player", msg.Message, true, msg.Topic)
 
 	// Generate responses from both agents
@@ -360,12 +361,41 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 			log.Printf("Failed to score user message: %v", err)
 		} else {
 			// Save argument and score to database
-			argID, err := s.db.SaveArgument("player1", msg.Topic, msg.Message)
+			// Determine which side the argument supports based on agent support scores
+			var side string
+			if score.Agent1_support > score.Agent2_support {
+				side = agent1Name
+			} else {
+				side = agent2Name
+			}
+
+			log.Printf("Argument supports: %s (Agent1: %d vs Agent2: %d)", side, score.Agent1_support, score.Agent2_support)
+
+			argID, err := s.db.SaveArgument("player1", msg.Topic, msg.Message, side)
 			if err != nil {
 				log.Printf("Failed to save argument: %v", err)
 			} else {
 				if err := s.db.SaveScore(argID, score); err != nil {
 					log.Printf("Failed to save score: %v", err)
+				}
+
+				// Send the complete argument with score through WebSocket
+				argument := database.Argument{
+					ID:      argID,
+					PlayerID: "player1",
+					Topic:    msg.Topic,
+					Content:  msg.Message,
+					Side:     side,
+					Score:    score,
+				}
+
+				log.Printf("Sending argument data through WebSocket: %+v", argument)
+
+				if err := ws.WriteJSON(gin.H{
+					"type":     "argument",
+					"argument": argument,
+				}); err != nil {
+					log.Printf("Failed to send argument to user: %v", err)
 				}
 			}
 

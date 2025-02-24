@@ -20,6 +20,7 @@ type Argument struct {
 	PlayerID  string                 `json:"player_id"`
 	Topic     string                 `json:"topic"`
 	Content   string                 `json:"content"`
+	Side      string                 `json:"side"`
 	CreatedAt string                 `json:"created_at"`
 	Score     *scoring.ArgumentScore `json:"score,omitempty"`
 }
@@ -55,9 +56,9 @@ func (d *Database) Close() error {
 }
 
 // SaveArgument saves a new argument to the database
-func (d *Database) SaveArgument(playerID, topic, content string) (int64, error) {
-	query := `INSERT INTO arguments (player_id, topic, content) VALUES (?, ?, ?)`
-	result, err := d.db.Exec(query, playerID, topic, content)
+func (d *Database) SaveArgument(playerID, topic, content, side string) (int64, error) {
+	query := `INSERT INTO arguments (player_id, topic, content, side) VALUES (?, ?, ?, ?)`
+	result, err := d.db.Exec(query, playerID, topic, content, side)
 	if err != nil {
 		return 0, fmt.Errorf("failed to save argument: %v", err)
 	}
@@ -83,7 +84,7 @@ func (d *Database) SaveScore(argumentID int64, score *scoring.ArgumentScore) err
 // GetArgumentWithScore retrieves an argument and its score by ID
 func (d *Database) GetArgumentWithScore(id int64) (*Argument, error) {
 	query := `
-		SELECT a.id, a.player_id, a.topic, a.content, a.created_at,
+		SELECT a.id, a.player_id, a.topic, a.content, a.side, a.created_at,
 			   s.strength, s.relevance, s.logic, s.truth, s.humor, s.average, s.explanation
 		FROM arguments a
 		LEFT JOIN scores s ON a.id = s.argument_id
@@ -93,7 +94,7 @@ func (d *Database) GetArgumentWithScore(id int64) (*Argument, error) {
 	var score scoring.ArgumentScore
 
 	err := d.db.QueryRow(query, id).Scan(
-		&arg.ID, &arg.PlayerID, &arg.Topic, &arg.Content, &arg.CreatedAt,
+		&arg.ID, &arg.PlayerID, &arg.Topic, &arg.Content, &arg.Side, &arg.CreatedAt,
 		&score.Strength, &score.Relevance, &score.Logic, &score.Truth, &score.Humor,
 		&score.Average, &score.Explanation,
 	)
@@ -111,7 +112,7 @@ func (d *Database) GetArgumentWithScore(id int64) (*Argument, error) {
 // GetAllArguments retrieves all arguments with their scores
 func (d *Database) GetAllArguments() ([]*Argument, error) {
 	query := `
-		SELECT a.id, a.player_id, a.topic, a.content, a.created_at,
+		SELECT a.id, a.player_id, a.topic, a.content, a.side, a.created_at,
 			   s.strength, s.relevance, s.logic, s.truth, s.humor, s.average, s.explanation
 		FROM arguments a
 		LEFT JOIN scores s ON a.id = s.argument_id

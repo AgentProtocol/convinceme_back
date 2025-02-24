@@ -30,7 +30,7 @@ type Scorer struct {
 func NewScorer(apiKey string) (*Scorer, error) {
 	llm, err := openai.New(
 		openai.WithToken(apiKey),
-		openai.WithModel("gpt-4-turbo-preview"),
+		openai.WithModel("gpt-4o-mini"),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create scorer LLM: %v", err)
