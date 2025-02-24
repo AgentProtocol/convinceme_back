@@ -62,9 +62,10 @@ type ConversationEntry struct {
 }
 
 type ConversationMessage struct {
-	Topic   string `json:"topic"`
-	Message string `json:"message"`
-	Type    string `json:"type"`
+	PlayerID string `json:"player_id"`
+	Topic    string `json:"topic"`
+	Message  string `json:"message"`
+	Type     string `json:"type"`
 }
 
 type audioCache struct {
@@ -371,7 +372,7 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 
 			log.Printf("Argument supports: %s (Agent1: %d vs Agent2: %d)", side, score.Agent1_support, score.Agent2_support)
 
-			argID, err := s.db.SaveArgument("player1", msg.Topic, msg.Message, side)
+			argID, err := s.db.SaveArgument(msg.PlayerID, msg.Topic, msg.Message, side)
 			if err != nil {
 				log.Printf("Failed to save argument: %v", err)
 			} else {
@@ -381,8 +382,8 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 
 				// Send the complete argument with score through WebSocket
 				argument := database.Argument{
-					ID:      argID,
-					PlayerID: "player1",
+					ID:       argID,
+					PlayerID: msg.PlayerID,
 					Topic:    msg.Topic,
 					Content:  msg.Message,
 					Side:     side,
