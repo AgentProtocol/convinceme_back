@@ -1,18 +1,16 @@
 package server
 
-import "time"
-
+// Config holds server configuration
 type Config struct {
-    OpenAIKey     string
-    Port          string
-    ResponseDelay time.Duration
-    Agents        map[string]AgentConfig
+	Port          string
+	OpenAIKey     string
+	ResponseDelay int
 }
 
 type AgentConfig struct {
-    Name           string
-    Role           string
-    Model          string
-    Voice          string
-    DebatePosition string
-} 
+	Name           string
+	Role           string
+	Model          string
+	Voice          string
+	DebatePosition string
+}

@@ -4,11 +4,13 @@ import (
 	"context"
 	"log"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/neo/convinceme_backend/internal/agent"
 	"github.com/neo/convinceme_backend/internal/conversation"
+	"github.com/neo/convinceme_backend/internal/database"
 	"github.com/neo/convinceme_backend/internal/player"
 	"github.com/neo/convinceme_backend/internal/server"
 	"github.com/neo/convinceme_backend/internal/types"
@@ -30,6 +32,19 @@ func main() {
 
 	// Check if HTTPS should be used
 	useHTTPS := os.Getenv("USE_HTTPS") == "true"
+
+	// Initialize database
+	db, err := database.New("data")
+	if err != nil {
+		logger.Fatalf("Failed to initialize database: %v", err)
+	}
+	defer db.Close()
+
+	// Ensure HLS directory exists
+	hlsDir := filepath.Join("static", "hls")
+	if err := os.MkdirAll(hlsDir, 0755); err != nil {
+		logger.Fatalf("Failed to create HLS directory: %v", err)
+	}
 
 	// Load agent configurations from JSON files
 	agent1Config, err := agent.LoadAgentConfig("internal/agent/grizzly.json")
@@ -59,10 +74,10 @@ func main() {
 	// Define the debate topic with explicit initial context
 	commonTopic := "Grizzly bears vs Tigers - who would win a fight?"
 
-	// Create conversation configuration with the common topic
+	// Create conversation configuration
 	convConfig := conversation.ConversationConfig{
 		Topic:           commonTopic,
-		MaxTurns:        10, // Increased turns for more detailed debate
+		MaxTurns:        10,
 		TurnDelay:       500 * time.Millisecond,
 		ResponseStyle:   types.ResponseStyleDebate, // Changed to debate style
 		MaxCompletionTokens:       150,                       // Increased tokens for more detailed responses
@@ -72,44 +87,22 @@ func main() {
 	// Create a new conversation with the common topic
 	conv := conversation.NewConversation(agent1, agent2, convConfig, inputHandler, apiKey)
 
-	// Create server config with proper initialization
-	serverConfig := &server.Config{
-		OpenAIKey:     apiKey,
-		Port:          ":8080",
-		ResponseDelay: 500 * time.Millisecond,
-		Agents: map[string]server.AgentConfig{
-			agent1Config.Name: {
-				Name:           agent1Config.Name,
-				Role:           agent1Config.Role,
-				Model:          "gpt-4-turbo-preview",
-				Voice:          agent1Config.Voice.String(),
-				DebatePosition: "Bear Expert",
-			},
-			agent2Config.Name: {
-				Name:           agent2Config.Name,
-				Role:           agent2Config.Role,
-				Model:          "gpt-4-turbo-preview",
-				Voice:          agent2Config.Voice.String(),
-				DebatePosition: "Tiger Specialist",
-			},
-		},
-	}
-
 	// Create agents map
 	agents := map[string]*agent.Agent{
 		agent1Config.Name: agent1,
 		agent2Config.Name: agent2,
 	}
 
-	// Create and start the server with proper config
-	srv := server.NewServer(agents, apiKey, useHTTPS, serverConfig)
-	if useHTTPS {
-		logger.Println("Starting HTTPS server with HTTP/3 support on :8080...")
-	} else {
-		logger.Println("Starting HTTP server on :8080...")
+	// Create server configuration
+	serverConfig := &server.Config{
+		Port:          ":8080",
+		OpenAIKey:     apiKey,
+		ResponseDelay: 500,
 	}
 
-	// Start server with error handling
+	// Create and start the server
+	srv := server.NewServer(agents, db, apiKey, useHTTPS, serverConfig)
+	logger.Printf("Starting server on %s...", serverConfig.Port)
 	if err := srv.Run(serverConfig.Port); err != nil {
 		logger.Fatalf("Server failed: %v", err)
 	}

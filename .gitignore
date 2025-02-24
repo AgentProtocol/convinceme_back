@@ -1,2 +1,19 @@
 .env
 /static/hls/*
+/data/*
+
+# SSL/TLS certificates and keys
+*.pem
+*.key
+*.crt
+*.csr
+*.srl
+*.p12
+*.pfx
+*.cert
+/ssl/
+/certs/
+
+# macOS system files
+.DS_Store
+**/.DS_Store
