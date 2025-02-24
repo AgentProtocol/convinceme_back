@@ -88,7 +88,7 @@ var upgrader = websocket.Upgrader{
 const (
 	TIGER_AGENT = "Tony 'The Tiger King' Chen"
 	BEAR_AGENT  = "Mike 'Grizzly' Johnson"
-	MAX_SCORE   = 200
+	MAX_SCORE   = 420
 )
 
 var agent1Score int = MAX_SCORE / 2
@@ -517,7 +517,7 @@ Examples of the tone we want:
 - "Seriously? A tiger? That's just a spicy housecat compared to my absolute unit of a bear!"
 
 Keep it fun, keep it spicy, but make your points count!`, conversationContext, agentName, agentRole)
-// This is the prompt when there's a player message	
+		// This is the prompt when there's a player message
 	default:
 		return fmt.Sprintf(`Current conversation context:
 %s
