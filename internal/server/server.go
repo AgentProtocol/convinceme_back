@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math"
 	"net/http"
 	"strconv"
 
@@ -244,14 +243,19 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 	s.connectedMutex.Unlock()
 
 	// Create a new stop channel for this connection
-	s.stopDiscussion = make(chan struct{})
+	stopChan := make(chan struct{}) // Create local stop channel
+	s.stopDiscussion = stopChan     // Assign to server field
 
 	// Ensure cleanup on disconnect
 	defer func() {
 		s.connectedMutex.Lock()
 		s.isUserConnected = false
 		s.connectedMutex.Unlock()
-		close(s.stopDiscussion)
+
+		// Only close if it matches our local channel
+		if s.stopDiscussion == stopChan {
+			close(stopChan)
+		}
 	}()
 
 	// Set read deadline for initial connection
@@ -578,6 +582,8 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 				waitTime := s.requiredDelay - timeSinceLastAudio
 				log.Printf("Waiting %v before next message", waitTime)
 				time.Sleep(waitTime)
+			} else {
+				isfirstmessage = true
 			}
 
 			// Start timing the entire generation process
@@ -666,8 +672,9 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 				totalGenerationTime)
 			log.Printf("Is first message: %v", isfirstmessage)
 			// Calculate delay
-			buffer := time.Duration(math.Min(audioDuration.Seconds()*0.2, 1.0)) * time.Second
-			remainingDelay := audioDuration + buffer
+			// buffer := time.Duration(math.Min(audioDuration.Seconds()*0.2, 1.0)) * time.Second
+			// remainingDelay := audioDuration + buffer
+			remainingDelay := audioDuration
 			if isfirstmessage {
 				remainingDelay = remainingDelay - totalGenerationTime
 				isfirstmessage = false
