@@ -1,75 +1,70 @@
 package audio
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
-	"fmt"
+    "bytes"
+    "context"
+    "encoding/json"
+    "fmt"
 	"io"
-	"log"
-	"net/http"
+    "net/http"
 )
 
-// TTSService handles text-to-speech conversion
 type TTSService struct {
-	apiKey string
-	voice  string
+    apiKey string // API key for Eleven Labs
+    voice  string // Voice model identifier
 }
 
-// NewTTSService creates a new TTS service instance
-func NewTTSService(apiKey string, voice string) (*TTSService, error) {
-	if apiKey == "" {
-		return nil, fmt.Errorf("OpenAI API key is required")
-	}
-
-	return &TTSService{
-		apiKey: apiKey,
-		voice:  voice,
-	}, nil
+// NewTTSService creates a new TTS service with a specified voice and API key
+func NewTTSService(apiKey, voice string) *TTSService {
+    return &TTSService{
+        apiKey: apiKey,
+        voice:  voice,
+    }
 }
 
-// GenerateAudio converts text to speech using OpenAI's TTS API
+// GenerateAudio converts text to speech using Eleven Labs' TTS API
 func (s *TTSService) GenerateAudio(ctx context.Context, text string) ([]byte, error) {
-	url := "https://api.openai.com/v1/audio/speech"
+    url := "https://api.elevenlabs.io/v1/text-to-speech/" + s.voice
 
-	requestBody := map[string]interface{}{
-		"model":           "tts-1",
-		"input":           text,
-		"voice":           s.voice,
-		"response_format": "mp3",
-	}
+    requestBody := map[string]interface{}{
+        "text": text,
+        "voice": s.voice,
+        "model": "elevenlabs", // Specify the model if needed
+    }
 
-	jsonBody, err := json.Marshal(requestBody)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request body: %v", err)
-	}
+    jsonBody, err := json.Marshal(requestBody)
+    if err != nil {
+        return nil, fmt.Errorf("failed to marshal request body: %v", err)
+    }
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(jsonBody))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %v", err)
-	}
+    req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBody))
+    if err != nil {
+        return nil, fmt.Errorf("failed to create request: %v", err)
+    }
 
-	req.Header.Set("Authorization", "Bearer "+s.apiKey)
-	req.Header.Set("Content-Type", "application/json")
+    req.Header.Set("Authorization", "Bearer "+s.apiKey)
+    req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to make request: %v", err)
-	}
-	defer resp.Body.Close()
+    client := &http.Client{}
+    resp, err := client.Do(req)
+    if err != nil {
+        return nil, fmt.Errorf("failed to make request: %v", err)
+    }
+    defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("API request failed with status %d: %s", resp.StatusCode, string(body))
-	}
+    if resp.StatusCode != http.StatusOK {
+        return nil, fmt.Errorf("failed to generate audio: %s", resp.Status)
+    }
 
-	audioData, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %v", err)
-	}
+    audioData, err := io.ReadAll(resp.Body)
+    if err != nil {
+        return nil, fmt.Errorf("failed to read response body: %v", err)
+    }
 
-	log.Printf("Generated audio for text: %s", text)
-
-	return audioData, nil
+    return audioData, nil
 }
+
+/* // Example of initializing the TTS service
+apiKey := "sk_14f431c6969dade4e1d77dc630b5cad392f9f69b6bd0c8ea"
+voice := "k2hfpYcftdtw2RdRiaYP" // e.g., "voice_1"
+ttsService := NewTTSService(apiKey, voice) */
