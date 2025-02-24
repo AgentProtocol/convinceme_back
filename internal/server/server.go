@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"sync"
 	"time"
@@ -34,6 +35,14 @@ type Server struct {
 	conversationMutex  sync.RWMutex
 	judge              *tools.ConvictionJudge
 	useHTTPS           bool
+	// New fields for continuous discussion
+	isUserConnected bool
+	connectedMutex  sync.RWMutex
+	userMessages    chan string
+	stopDiscussion  chan struct{}
+	// Field to track pending user message
+	pendingUserMessage     string
+	pendingUserMessageLock sync.RWMutex
 }
 
 type ConversationEntry struct {
@@ -52,6 +61,7 @@ type ConversationMessage struct {
 type audioCache struct {
 	data      []byte
 	timestamp time.Time
+	duration  time.Duration
 }
 
 var upgrader = websocket.Upgrader{
@@ -94,6 +104,9 @@ func NewServer(agents map[string]*agent.Agent, apiKey string, useHTTPS bool) *Se
 		conversationLog:   make([]ConversationEntry, 0),
 		judge:             judge,
 		useHTTPS:          useHTTPS,
+		// Initialize new fields
+		userMessages:   make(chan string, 10),
+		stopDiscussion: make(chan struct{}),
 	}
 
 	router.GET("/ws/conversation", server.handleConversationWebSocket)
@@ -183,6 +196,22 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 	}
 	defer ws.Close()
 
+	// Set user as connected
+	s.connectedMutex.Lock()
+	s.isUserConnected = true
+	s.connectedMutex.Unlock()
+
+	// Create a new stop channel for this connection
+	s.stopDiscussion = make(chan struct{})
+
+	// Ensure cleanup on disconnect
+	defer func() {
+		s.connectedMutex.Lock()
+		s.isUserConnected = false
+		s.connectedMutex.Unlock()
+		close(s.stopDiscussion)
+	}()
+
 	// Set read deadline for initial connection
 	ws.SetReadDeadline(time.Now().Add(time.Second * 60))
 
@@ -207,6 +236,9 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 			}
 		}
 	}()
+
+	// Start continuous discussion in a separate goroutine
+	go s.continueAgentDiscussion(ws)
 
 	// Handle incoming messages
 	for {
@@ -235,7 +267,15 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 		s.lastPlayerMessage = time.Now()
 		s.playerMessageMutex.Unlock()
 
-		s.continueAgentDiscussion(ws, msg)
+		// Update pending user message
+		s.pendingUserMessageLock.Lock()
+		s.pendingUserMessage = msg.Message
+		s.pendingUserMessageLock.Unlock()
+
+		// Add to conversation log
+		s.addToConversationLog("Player", msg.Message, true)
+
+		log.Printf("User message received: %s", msg.Message)
 	}
 }
 
@@ -281,7 +321,7 @@ Remember:
 4. Address any points about the opposing predator with scientific counter-arguments
 5. Never deviate from the debate topic
 6. Be passionate but factual about your position
-7. Do not repeat or acknowledge the player's message directly - just continue the debate naturally
+7. Acknowledge the player's message directly
 
 Generate a response that maintains the debate focus and supports your position.`
 	case "continue_debate":
@@ -314,74 +354,133 @@ Generate a response that advances the debate while maintaining scientific credib
 	}
 }
 
-func (s *Server) continueAgentDiscussion(ws *websocket.Conn, msg ConversationMessage) {
-	// Get conversation context
-	conversationContext := s.getConversationContext()
+func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
+	// Check if user is connected
+	s.connectedMutex.RLock()
+	isConnected := s.isUserConnected
+	s.connectedMutex.RUnlock()
 
-	// Get the next agent to speak
-	agent := s.getNextAgent()
-	if agent == nil {
-		log.Printf("No agents available")
+	if !isConnected {
 		return
 	}
 
-	promptType := "continue_debate"
-	if msg.Message == "" {
-		// Add player message to conversation log
-		s.addToConversationLog("Player", msg.Message, true)
-		promptType = "player_message"
-	}
+	for {
+		select {
+		case <-s.stopDiscussion:
+			return
+		default:
+			// Start timing the entire generation process
+			generationStart := time.Now()
 
-	ctx := context.Background()
-	prompt := fmt.Sprintf(getPrompt(promptType),
-		conversationContext,
-		agent.GetName(),
-		agent.GetRole())
+			// Get conversation context
+			conversationContext := s.getConversationContext()
 
-	response, err := agent.GenerateResponse(ctx, "Bear vs Tiger Debate", prompt)
-	if err != nil {
-		log.Printf("Failed to generate response: %v", err)
-		return
-	}
+			// Get the next agent to speak
+			agent := s.getNextAgent()
+			if agent == nil {
+				log.Printf("No agents available")
+				return
+			}
 
-	// Add response to conversation log
-	s.addToConversationLog(agent.GetName(), response, false)
+			// Check for pending user message
+			s.pendingUserMessageLock.RLock()
+			pendingMessage := s.pendingUserMessage
+			// Clear pending user message
+			s.pendingUserMessage = ""
+			s.pendingUserMessageLock.RUnlock()
 
-	// Send text response
-	if err := ws.WriteJSON(gin.H{
-		"type":    "text",
-		"message": response,
-		"agent":   agent.GetName(),
-	}); err != nil {
-		log.Printf("Failed to send text response: %v", err)
-		return
-	}
+			promptType := "continue_debate"
+			if pendingMessage != "" {
+				promptType = "player_message"
+			}
 
-	// After each agent response
-	// Before generating audio
-	s.analyzeConviction(context.Background(), ws)
+			ctx := context.Background()
+			prompt := fmt.Sprintf(getPrompt(promptType),
+				conversationContext,
+				agent.GetName(),
+				agent.GetRole())
 
-	// Generate and send audio
-	audioData, err := agent.GenerateAndStreamAudio(ctx, response)
-	if err != nil {
-		log.Printf("Failed to generate audio: %v", err)
-		return
-	}
+			// Time the response generation
+			responseStart := time.Now()
+			response, err := agent.GenerateResponse(ctx, "Bear vs Tiger Debate", prompt)
+			responseGenerationTime := time.Since(responseStart)
+			if err != nil {
+				log.Printf("Failed to generate response: %v", err)
+				continue
+			}
 
-	audioID := fmt.Sprintf("%s_%d", agent.GetName(), time.Now().UnixNano())
-	s.cacheMutex.Lock()
-	s.audioCache[audioID] = audioCache{
-		data:      audioData,
-		timestamp: time.Now(),
-	}
-	s.cacheMutex.Unlock()
+			// Add response to conversation log
+			s.addToConversationLog(agent.GetName(), response, false)
 
-	if err := ws.WriteJSON(gin.H{
-		"type":     "audio",
-		"audioUrl": fmt.Sprintf("/api/audio/%s", audioID),
-		"agent":    agent.GetName(),
-	}); err != nil {
-		log.Printf("Failed to send audio URL: %v", err)
+			// Send text response
+			if err := ws.WriteJSON(gin.H{
+				"type":    "text",
+				"message": response,
+				"agent":   agent.GetName(),
+			}); err != nil {
+				log.Printf("Failed to send text response: %v", err)
+				return
+			}
+
+			// After each agent response
+			s.analyzeConviction(context.Background(), ws)
+
+			// Time the audio generation
+			audioStart := time.Now()
+			audioData, err := agent.GenerateAndStreamAudio(ctx, response)
+			audioGenerationTime := time.Since(audioStart)
+			if err != nil {
+				log.Printf("Failed to generate audio: %v", err)
+				continue
+			}
+
+			audioDuration := getAudioDuration(audioData)
+			audioID := fmt.Sprintf("%s_%d", agent.GetName(), time.Now().UnixNano())
+
+			s.cacheMutex.Lock()
+			s.audioCache[audioID] = audioCache{
+				data:      audioData,
+				timestamp: time.Now(),
+				duration:  audioDuration,
+			}
+			s.cacheMutex.Unlock()
+
+			if err := ws.WriteJSON(gin.H{
+				"type":     "audio",
+				"audioUrl": fmt.Sprintf("/api/audio/%s", audioID),
+				"agent":    agent.GetName(),
+				"duration": audioDuration.Seconds(),
+			}); err != nil {
+				log.Printf("Failed to send audio URL: %v", err)
+				return
+			}
+
+			// Calculate total generation time
+			totalGenerationTime := time.Since(generationStart)
+
+			// Log timing information
+			log.Printf("Generation timing for %s: Response=%v, Audio=%v, Total=%v",
+				agent.GetName(),
+				responseGenerationTime,
+				audioGenerationTime,
+				totalGenerationTime)
+
+			// Calculate the actual delay needed
+			// We want the total time from start to next response to be audioDuration + buffer
+			// So we subtract the time we've already spent generating everything
+			buffer := time.Duration(math.Min(audioDuration.Seconds()*0.2, 0.5) * float64(time.Second))
+			targetTotalTime := audioDuration + buffer
+			remainingDelay := targetTotalTime - totalGenerationTime
+
+			// Only sleep if we need to wait more
+			if remainingDelay > 0 {
+				time.Sleep(remainingDelay)
+			} else {
+				// If generation took longer than audio duration, log it as potential issue
+				log.Printf("Warning: Generation time (%v) exceeded audio duration (%v) for %s",
+					totalGenerationTime, audioDuration, agent.GetName())
+			}
+		}
 	}
 }
 
@@ -534,4 +633,13 @@ func (s *Server) analyzeConviction(ctx context.Context, ws *websocket.Conn) {
 			log.Printf("Failed to send conviction analysis: %v", err)
 		}
 	}
+}
+
+// getAudioDuration calculates the duration of AAC audio data
+// OpenAI TTS uses AAC-LC with 64kbps bitrate
+func getAudioDuration(audioData []byte) time.Duration {
+	// AAC-LC 64kbps = 8000 bytes per second
+	bytesPerSecond := 8000
+	seconds := float64(len(audioData)) / float64(bytesPerSecond)
+	return time.Duration(seconds * float64(time.Second))
 }
