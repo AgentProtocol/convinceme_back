@@ -2,7 +2,8 @@
 PROJECT_NAME := convinceme_backend
 PORT := 8080
 DB_PATH := data/arguments.db
-SQL_PATH := sql/queries.sql
+SCHEMA_PATH := sql/schema.sql
+QUERY_PATH := sql/queries.sql
 
 # Directory structure
 .PHONY: dirs
@@ -18,15 +19,21 @@ ssl:
 	@openssl req -new -key key.pem -out cert.csr
 	@openssl req -x509 -key key.pem -in cert.csr -out cert.pem -days 365
 
+# Go module management
+.PHONY: tidy
+tidy:
+	@echo "Tidying Go modules..."
+	@go mod tidy
+
 # Database initialization
 .PHONY: init-db
 init-db: dirs
-	@echo "Initializing database..."
-	@sqlite3 $(DB_PATH) < $(SQL_PATH)
+	@echo "Initializing database schema..."
+	@sqlite3 $(DB_PATH) < $(SCHEMA_PATH)
 
 # Full setup
 .PHONY: setup
-setup: dirs init-db ssl
+setup: dirs init-db ssl tidy
 	@echo "Setup completed. You can now run the server."
 
 # Build and run commands
@@ -58,7 +65,7 @@ clean:
 .PHONY: db-check
 db-check:
 	@echo "Checking database with SQL queries..."
-	@sqlite3 $(DB_PATH) ".read $(SQL_PATH)"
+	@sqlite3 $(DB_PATH) ".read $(QUERY_PATH)"
 
 .PHONY: db-shell
 db-shell:
@@ -99,10 +106,11 @@ kill-server:
 .PHONY: help
 help:
 	@echo "Setup commands:"
-	@echo "  make setup            - Full setup (dirs, database, SSL)"
+	@echo "  make setup            - Full setup (dirs, database, SSL, tidy)"
 	@echo "  make dirs            - Create required directories"
 	@echo "  make ssl             - Generate SSL certificates"
 	@echo "  make init-db         - Initialize database"
+	@echo "  make tidy            - Tidy Go modules"
 	@echo "  make clean           - Clean up generated files"
 	@echo "\nServer commands:"
 	@echo "  make start           - Kill existing server and start fresh (recommended)"
