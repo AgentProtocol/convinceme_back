@@ -80,6 +80,12 @@ var upgrader = websocket.Upgrader{
 	EnableCompression: true,
 }
 
+// Define constants for agent roles
+const (
+	TIGER_AGENT = "Tony 'The Tiger King' Chen"
+	BEAR_AGENT  = "Mike 'Grizzly' Johnson"
+)
+
 func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey string, useHTTPS bool, config *Config) *Server {
 	judge, err := tools.NewConvictionJudge(apiKey)
 	if err != nil {
@@ -342,20 +348,23 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 	ctx := context.Background()
 
 	// Get agent names
-	var agent1Name, agent2Name string
-	for name := range s.agents {
-		if agent1Name == "" {
-			agent1Name = name
-		} else {
-			agent2Name = name
-			break
-		}
-	}
+	// var agent1Name, agent2Name string
+	agent1Name, agent2Name := s.GetOrderedAgentNames()
+
+	log.Printf("\n-------------->agent1Name is %s, agent2Name is %s\n", agent1Name, agent2Name)
+	// for name := range s.agents {
+	// 	if agent1Name == "" {
+	// 		agent1Name = name
+	// 	} else {
+	// 		agent2Name = name
+	// 		break
+	// 	}
+	// }
 
 	// Score the user's message first
 	if s.scorer != nil {
 		log.Printf("\n=== Scoring User Message ===\n")
-		score, err := s.scorer.ScoreArgument(ctx, msg.Message, msg.Topic, agent1Name, agent2Name)
+		score, agent1Name, agent2Name, err := s.scorer.ScoreArgument(ctx, msg.Message, msg.Topic, agent1Name, agent2Name)
 		if err != nil {
 			log.Printf("Failed to score user message: %v", err)
 		} else {
@@ -381,6 +390,8 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 					"Average: %.1f/100\n"+
 					"Agent1_support: %d/100\n"+
 					"Agent2_support: %d/100\n"+
+					"Agent1_role: %s\n"+
+					"Agent2_role: %s\n"+
 					"Explanation: %s\n",
 					score.Strength,
 					score.Relevance,
@@ -390,6 +401,8 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 					score.Average,
 					score.Agent1_support,
 					score.Agent2_support,
+					agent1Name,
+					agent2Name,
 					score.Explanation),
 			}); err != nil {
 				log.Printf("Failed to send score to user: %v", err)
@@ -405,6 +418,8 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 				"Average: %.1f/100\n"+
 				"Agent1_support: %d/100\n"+
 				"Agent2_support: %d/100\n"+
+				"agent1Name: %s\n"+
+				"agent2Name: %s\n"+
 				"Explanation: %s\n",
 				score.Strength,
 				score.Relevance,
@@ -414,8 +429,14 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 				score.Average,
 				score.Agent1_support,
 				score.Agent2_support,
+				agent1Name,
+				agent2Name,
 				score.Explanation)
-		}
+				}
+
+			// delta, winner := decidePlayerVote(score.Agent1_support, score.Agent2_support, agent1Name, agent2Name)
+			_, _, := decidePlayerVote(score.Agent1_support, score.Agent2_support, agent1Name, agent2Name)
+
 	}
 }
 
@@ -774,4 +795,50 @@ func getAudioDuration(audioData []byte) time.Duration {
 	bytesPerSecond := 16000
 	seconds := float64(len(audioData)) / float64(bytesPerSecond)
 	return time.Duration(seconds * float64(time.Second))
+}
+
+// GetOrderedAgentNames returns agent names in a consistent order
+func (s *Server) GetOrderedAgentNames() (agent1Name, agent2Name string) {
+	// First look for Tiger Agent, then Bear Agent
+	for name, agent := range s.agents {
+		switch agent.GetName() {
+		case TIGER_AGENT:
+			agent1Name = name
+		case BEAR_AGENT:
+			agent2Name = name
+		}
+	}
+
+	// Optional validation
+	if agent1Name == "" || agent2Name == "" {
+		log.Printf("Warning: Could not find both agents. Tiger: %s, Bear: %s", agent1Name, agent2Name)
+	}
+
+	return agent1Name, agent2Name
+}
+
+// Function to decide player vote and calculate delta
+func decidePlayerVote(agent1Support, agent2Support int, agent1Name, agent2Name string) (int, string) {
+	// Calculate the delta
+	delta := abs(agent1Support - agent2Support)
+
+	// Determine the winner
+	var winner string
+	if agent1Support > agent2Support {
+		winner = agent1Name
+	} else if agent2Support > agent1Support {
+		winner = agent2Name
+	} else {
+		winner = ""
+	}
+
+	return delta, winner
+}
+
+// Helper function to calculate absolute value
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
 }

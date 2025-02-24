@@ -58,7 +58,7 @@ func NewAgent(apiKey string, config AgentConfig) (*Agent, error) {
 	// Configure OpenAI client options
 	opts := []openai.Option{
 		openai.WithToken(apiKey),
-		openai.WithModel("gpt-4-turbo"),
+		openai.WithModel("gpt-4o-mini"),
 	}
 
 	// Create LLM client with configuration
