@@ -80,11 +80,16 @@ var upgrader = websocket.Upgrader{
 	EnableCompression: true,
 }
 
+
 // Define constants for agent roles
 const (
 	TIGER_AGENT = "Tony 'The Tiger King' Chen"
 	BEAR_AGENT  = "Mike 'Grizzly' Johnson"
+	MAX_SCORE = 200
 )
+
+var gameScore int  = MAX_SCORE/2;
+
 
 func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey string, useHTTPS bool, config *Config) *Server {
 	judge, err := tools.NewConvictionJudge(apiKey)
@@ -434,8 +439,29 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 				score.Explanation)
 				}
 
-			// delta, winner := decidePlayerVote(score.Agent1_support, score.Agent2_support, agent1Name, agent2Name)
-			_, _, := decidePlayerVote(score.Agent1_support, score.Agent2_support, agent1Name, agent2Name)
+			delta, winner := decidePlayerVote(score.Agent1_support, score.Agent2_support, agent1Name, agent2Name)
+			if (winner == agent1Name) {
+				gameScore = gameScore - delta
+			}
+			if (winner == agent2Name) {
+				gameScore = gameScore + delta
+			}
+			log.Printf("%s scored %d points ", winner, delta);
+			log.Printf("==================Gamescore is %d ====================", gameScore);
+
+			if (gameScore <= 0 || gameScore >= 200) {
+				log.Printf("=================================================================");
+				log.Printf("=================================================================");
+				log.Printf("===========================%s won !!!!!!!!!! ====================", winner);
+				log.Printf("=================================================================");
+				log.Printf("=================================================================");
+			}
+			delta = 0
+			winner = ""
+
+
+			// _, _, := decidePlayerVote(score.Agent1_support, score.Agent2_support, agent1Name, agent2Name)
+
 
 	}
 }
