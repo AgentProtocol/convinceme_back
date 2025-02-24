@@ -285,16 +285,13 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 	// Add player message to conversation log
 	s.addToConversationLog("Player", msg.Message, true)
 
-	// Get conversation context
+	// // Get conversation context
 	conversationContext := s.getConversationContext()
 
 	// Generate responses from both agents
 	ctx := context.Background()
-	type agentResponse struct {
-		name     string
-		response string
-		order    int
-	}
+
+	// Get agent names
 	var agent1Name, agent2Name string
     for name := range s.agents {
         if agent1Name == "" {
@@ -312,10 +309,36 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 		if err != nil {
 			log.Printf("Failed to score user message: %v", err)
 		} else {
+			
 			// Send score back to user
 			if err := ws.WriteJSON(gin.H{
 				"type": "score",
 				"message": fmt.Sprintf("Argument score:\n"+
+                    "Strength: %d/100\n"+
+                    "Relevance: %d/100\n"+
+                    "Logic: %d/100\n"+
+                    "Truth: %d/100\n"+
+                    "Humor: %d/100\n"+
+                    "Average: %.1f/100\n"+
+					"Agent1_support: %d/100\n"+
+					"Agent2_support: %d/100\n"+
+					"Explanation: %s\n",
+                    score.Strength,
+                    score.Relevance,
+                    score.Logic,
+                    score.Truth,
+                    score.Humor,
+                    score.Average,
+					score.Agent1_support,
+					score.Agent2_support,
+					score.Explanation),
+			}); 
+			err != nil {
+				log.Printf("Failed to send score to user: %v", err)
+			}
+			log.Printf("Raw Jason values in server.go are:\n")
+
+			log.Printf("Argument score:\n"+
                     "Strength: %d/100\n"+
                     "Relevance: %d/100\n"+
                     "Logic: %d/100\n"+
@@ -333,11 +356,7 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
                     score.Average,
 					score.Agent1_support,
 					score.Agent2_support,
-					score.Explanation),
-			}); 
-			err != nil {
-				log.Printf("Failed to send score to user: %v", err)
-			}
+					score.Explanation);
 		}
 	}
 

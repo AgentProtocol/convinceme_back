@@ -50,16 +50,20 @@ Score each aspect from 0-100 and explain why:
 - Logic: Quality of reasoning and structure
 - Truth: Factual accuracy and credibility
 - Humor: Entertainment and engagement value
+- Supporting "%s": How much does this support "%s" position (0-100)
+- Supporting "%s": How much does this support "%s" position (0-100)
 - Explanation: Brief explanation of scores,
 
-Your response MUST ONLY be a valid JSON object with the following structure, dont include the word "json", just make it a valid json-formatted object:
-{
+
+Your response MUST ONLY be a valid JSON object with the following structure. Dont write the word json, just output a correct json-formatted object, starting with a { symbol
     "strength": <0-100>,
     "relevance": <0-100>,
     "logic": <0-100>,
     "truth": <0-100>,
     "humor": <0-100>,
-    "explanation": "<brief explanation of scores>",
+	"Agent1_support": <0-100>,
+    "Agent2_support": <0-100>,
+    "Explanation": "<brief explanation of scores>"
 }`, topic, argument, agent1Name, agent2Name, agent1Name, agent2Name)
 
 	completion, err := s.llm.Call(ctx, prompt)
@@ -69,9 +73,10 @@ Your response MUST ONLY be a valid JSON object with the following structure, don
 
 	completion = strings.TrimSpace(completion)
 	completion = strings.Trim(completion, "`")
+	log.Printf("Raw Jason in scorer.go is :\n")
+
 	log.Printf(completion)
 
-	log.Printf("Raw Jason was:\n")
 
 	var score ArgumentScore
 	if err := json.Unmarshal([]byte(completion), &score); err != nil {
