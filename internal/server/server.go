@@ -318,10 +318,10 @@ Remember:
 1. Stay strictly focused on the bear vs tiger debate
 2. Use your expertise to support your position
 3. Reference specific facts and studies about your species
-4. Address any points about the opposing predator with scientific counter-arguments
 5. Never deviate from the debate topic
 6. Be passionate but factual about your position
-7. Acknowledge the player's message directly
+7. The latest message is from the player
+8. You should respond to that Player message by repeating the points made in the message and then addressing them
 
 Generate a response that maintains the debate focus and supports your position.`
 	case "continue_debate":
@@ -363,6 +363,8 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 	if !isConnected {
 		return
 	}
+
+	isFirstMessage := true
 
 	for {
 		select {
@@ -455,7 +457,7 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 				return
 			}
 
-			// Calculate total generation time
+			// Calculate total generation time for this message
 			totalGenerationTime := time.Since(generationStart)
 
 			// Log timing information
@@ -465,20 +467,19 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 				audioGenerationTime,
 				totalGenerationTime)
 
-			// Calculate the actual delay needed
-			// We want the total time from start to next response to be audioDuration + buffer
-			// So we subtract the time we've already spent generating everything
+			// Calculate delay
 			buffer := time.Duration(math.Min(audioDuration.Seconds()*0.2, 0.5) * float64(time.Second))
-			targetTotalTime := audioDuration + buffer
-			remainingDelay := targetTotalTime - totalGenerationTime
-
+			remainingDelay := audioDuration + buffer
+			if isFirstMessage {
+				remainingDelay -= totalGenerationTime
+				isFirstMessage = false
+			}
 			// Only sleep if we need to wait more
 			if remainingDelay > 0 {
 				time.Sleep(remainingDelay)
+				log.Printf("Waited for %v before next message", remainingDelay)
 			} else {
-				// If generation took longer than audio duration, log it as potential issue
-				log.Printf("Warning: Generation time (%v) exceeded audio duration (%v) for %s",
-					totalGenerationTime, audioDuration, agent.GetName())
+				log.Printf("No delay needed, generation difference exceeds audio duration")
 			}
 		}
 	}
