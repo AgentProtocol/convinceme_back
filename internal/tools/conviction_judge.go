@@ -20,7 +20,7 @@ type ConvictionMetrics struct {
 	Agent1Score     float64 `json:"agent1_score"`     // 0-1 conviction score for agent1
 	Agent2Score     float64 `json:"agent2_score"`     // 0-1 conviction score for agent2
 	Agent1Name      string  `json:"agent1_name"`      // Name of agent1
-    Agent2Name      string  `json:"agent2_name"`      // Name of agent2
+	Agent2Name      string  `json:"agent2_name"`      // Name of agent2
 	OverallTension  float64 `json:"overall_tension"`  // 0-1 tension level between agents
 	DominantAgent   string  `json:"dominant_agent"`   // Name of the agent showing more conviction
 	AnalysisSummary string  `json:"analysis_summary"` // Brief analysis of the conviction dynamics
@@ -28,12 +28,12 @@ type ConvictionMetrics struct {
 
 // ConvictionContext represents the input context for conviction analysis
 type ConvictionContext struct {
-	Agent1Name      string             `json:"agent1_name"`
-	Agent2Name      string             `json:"agent2_name"`
-	Conversation    []ConversationEntry `json:"conversation"`
-	UserArgument    string             `json:"user_argument"`
-	UserScore       *ArgumentScore     `json:"user_score"`
-	InitialMetrics  ConvictionMetrics  `json:"initial_metrics"`
+	Agent1Name     string              `json:"agent1_name"`
+	Agent2Name     string              `json:"agent2_name"`
+	Conversation   []ConversationEntry `json:"conversation"`
+	UserArgument   string              `json:"user_argument"`
+	UserScore      *ArgumentScore      `json:"user_score"`
+	InitialMetrics ConvictionMetrics   `json:"initial_metrics"`
 }
 
 // ArgumentScore represents the scoring metrics for an argument
