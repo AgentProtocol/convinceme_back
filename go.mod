@@ -11,6 +11,7 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/quic-go/quic-go v0.48.2
 	github.com/sashabaranov/go-openai v1.17.9
+	github.com/tcolgate/mp3 v0.0.0-20170426193717-e79c5a46d300
 	github.com/tmc/langchaingo v0.1.3
 )
 

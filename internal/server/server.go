@@ -1,12 +1,15 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
+	"math"
 	"net/http"
 	"strconv"
 
@@ -17,6 +20,7 @@ import (
 
 	"github.com/neo/convinceme_backend/internal/audio"
 	"github.com/quic-go/quic-go/http3"
+	"github.com/tcolgate/mp3"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -515,6 +519,8 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 		return
 	}
 
+	isfirstmessage := true
+
 	for {
 		select {
 		case <-s.stopDiscussion:
@@ -609,7 +615,12 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 				totalGenerationTime)
 
 			// Calculate delay
-			remainingDelay := audioDuration - totalGenerationTime
+			buffer := time.Duration(math.Min(audioDuration.Seconds()*0.2, 1.0)) * time.Second
+			remainingDelay := audioDuration + buffer
+			if isfirstmessage {
+				remainingDelay = remainingDelay - totalGenerationTime
+				isfirstmessage = false
+			}
 			log.Printf("Remaining delay: %v", remainingDelay)
 			log.Printf("Total generation time: %v", totalGenerationTime)
 			// Only sleep if we need to wait more
@@ -798,11 +809,26 @@ func (s *Server) analyzeConviction(ctx context.Context, ws *websocket.Conn) {
 	}
 }
 
-// getAudioDuration calculates the duration of MP3 audio data
-// This is an estimation based on typical MP3 bitrate of 128 kbps
+// getAudioDuration calculates the duration of MP3 audio data by parsing MP3 frames
 func getAudioDuration(audioData []byte) time.Duration {
-	// MP3 128kbps = 16000 bytes per second (average)
-	bytesPerSecond := 16000
-	seconds := float64(len(audioData)) / float64(bytesPerSecond)
-	return time.Duration(seconds * float64(time.Second))
+	reader := bytes.NewReader(audioData)
+	decoder := mp3.NewDecoder(reader)
+
+	var duration time.Duration
+	var frame mp3.Frame
+	skipped := 0
+
+	for {
+		err := decoder.Decode(&frame, &skipped)
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			log.Printf("Error decoding MP3 frame: %v", err)
+			break
+		}
+		duration += frame.Duration()
+	}
+
+	return duration
 }
