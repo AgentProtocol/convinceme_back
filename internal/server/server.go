@@ -290,41 +290,56 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 
 	// Generate responses from both agents
 	ctx := context.Background()
-	type agentResponse struct {
+	/* type agentResponse struct {
 		name     string
 		response string
 		order    int
-	}
+	} */
 
 	// Score the user's message first
+	var userScore *tools.ArgumentScore
 	if s.scorer != nil {
 		log.Printf("\n=== Scoring User Message ===\n")
 		score, err := s.scorer.ScoreArgument(ctx, msg.Message, msg.Topic)
 		if err != nil {
 			log.Printf("Failed to score user message: %v", err)
 		} else {
+			// Convert scoring.ArgumentScore to tools.ArgumentScore
+			userScore = &tools.ArgumentScore{
+				Strength:    score.Strength,
+				Relevance:   score.Relevance,
+				Logic:       score.Logic,
+				Truth:       score.Truth,
+				Humor:       score.Humor,
+				Average:     score.Average,
+				Explanation: score.Explanation,
+			}
 			// Send score back to user
 			if err := ws.WriteJSON(gin.H{
 				"type": "score",
 				"message": fmt.Sprintf("Argument score:\n"+
-                    "Strength: %d/100\n"+
-                    "Relevance: %d/100\n"+
-                    "Logic: %d/100\n"+
-                    "Truth: %d/100\n"+
-                    "Humor: %d/100\n"+
-                    "Average: %.1f/100\n",
-                    score.Strength,
-                    score.Relevance,
-                    score.Logic,
-                    score.Truth,
-                    score.Humor,
-                    score.Average),
+					"Strength: %d/100\n"+
+					"Relevance: %d/100\n"+
+					"Logic: %d/100\n"+
+					"Truth: %d/100\n"+
+					"Humor: %d/100\n"+
+					"Average: %.1f/100\n",
+					score.Strength,
+					score.Relevance,
+					score.Logic,
+					score.Truth,
+					score.Humor,
+					score.Average),
 			}); 
 			err != nil {
 				log.Printf("Failed to send score to user: %v", err)
 			}
 		}
 	}
+
+	//! conviction prompt
+	// Analyze conviction before generating responses
+	metrics := s.analyzeConvictionWithUserScore(context.Background(), ws, userScore, msg.Message)
 
 	// Process agent responses
 	responses := make(map[string]string)
@@ -337,6 +352,13 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 		wg.Add(1)
 		go func(agentName string, agent *agent.Agent) {
 			defer wg.Done()
+
+			//! conviction prompt
+			// Get agent's current conviction level
+			conviction := metrics.Agent1Score
+			if agentName == metrics.Agent2Name {
+				conviction = metrics.Agent2Score
+			}
 
 			/* // Determine response order (1 for directly addressed, 2 for others)
 			order := 2
@@ -386,7 +408,8 @@ Keep it fun, keep it spicy, but make your points count!
 				conversationContext,
 				msg.Message,
 				agent.GetName(),
-				agent.GetRole())
+				agent.GetRole(),
+				conviction)
 
 			response, err := agent.GenerateResponse(ctx, msg.Topic, prompt)
 			if err != nil {
@@ -725,4 +748,80 @@ func (s *Server) analyzeConviction(ctx context.Context, ws *websocket.Conn) {
 			log.Printf("Failed to send conviction analysis: %v", err)
 		}
 	}
+}
+
+func (s *Server) analyzeConvictionWithUserScore(ctx context.Context, ws *websocket.Conn, userScore *tools.ArgumentScore, userMessage string) tools.ConvictionMetrics {
+	if s.judge == nil {
+		// Return default metrics if judge is not available
+		return tools.ConvictionMetrics{
+			Agent1Score:    1.0,
+			Agent2Score:    1.0,
+			OverallTension: 1.0,
+		}
+	}
+
+	s.conversationMutex.RLock()
+	defer s.conversationMutex.RUnlock()
+
+	// Convert conversation log to judge's format
+	judgeConversation := make([]tools.ConversationEntry, 0, len(s.conversationLog))
+	for _, entry := range s.conversationLog {
+		if !entry.IsPlayer {
+			judgeConversation = append(judgeConversation, tools.ConversationEntry{
+				Speaker: entry.Speaker,
+				Message: entry.Message,
+			})
+		}
+	}
+
+	// Get agent names
+	var agent1Name, agent2Name string
+	for name := range s.agents {
+		if agent1Name == "" {
+			agent1Name = name
+		} else {
+			agent2Name = name
+			break
+		}
+	}
+	// Create conviction context with user score
+	convictionContext := tools.ConvictionContext{
+		Agent1Name:     agent1Name,
+		Agent2Name:     agent2Name,
+		Conversation:   judgeConversation,
+		UserArgument:   userMessage,
+		UserScore:      userScore,
+		InitialMetrics: tools.ConvictionMetrics{
+			Agent1Score:    1.0,
+			Agent2Score:    1.0,
+			OverallTension: 1.0,
+		},
+	}
+
+	convictionJSON, err := json.Marshal(convictionContext)
+	if err != nil {
+		log.Printf("Warning: Failed to marshal conviction context: %v", err)
+		return convictionContext.InitialMetrics
+	}
+
+	metricsJSON, err := s.judge.Call(ctx, string(convictionJSON))
+	if err != nil {
+		log.Printf("Warning: Failed to analyze conviction: %v", err)
+		return convictionContext.InitialMetrics
+	}
+
+	var metrics tools.ConvictionMetrics
+	if err := json.Unmarshal([]byte(metricsJSON), &metrics); err != nil {
+		log.Printf("Warning: Failed to parse conviction metrics: %v", err)
+		return convictionContext.InitialMetrics
+	}
+	// Send conviction metrics to frontend
+	if err := ws.WriteJSON(gin.H{
+		"type": "conviction_update",
+		"metrics": metrics,
+	}); err != nil {
+		log.Printf("Failed to send conviction update: %v", err)
+	}
+
+	return metrics
 }
