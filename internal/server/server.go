@@ -68,6 +68,7 @@ type ConversationMessage struct {
 	Topic    string `json:"topic"`
 	Message  string `json:"message"`
 	Type     string `json:"type"`
+	Side     string `json:"side"`
 }
 
 type audioCache struct {
@@ -372,16 +373,10 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 		} else {
 			// Save argument and score to database
 			// Determine which side the argument supports based on agent support scores
-			var side string
-			if score.Agent1_support > score.Agent2_support {
-				side = agent1Name
-			} else {
-				side = agent2Name
-			}
 
-			log.Printf("Argument supports: %s (Agent1: %d vs Agent2: %d)", side, score.Agent1_support, score.Agent2_support)
+			log.Printf("Argument supports: %s", msg.Side)
 
-			argID, err := s.db.SaveArgument(msg.PlayerID, msg.Topic, msg.Message, side)
+			argID, err := s.db.SaveArgument(msg.PlayerID, msg.Topic, msg.Message, msg.Side)
 			if err != nil {
 				log.Printf("Failed to save argument: %v", err)
 			} else {
@@ -395,7 +390,7 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 					PlayerID:  msg.PlayerID,
 					Topic:     msg.Topic,
 					Content:   msg.Message,
-					Side:      side,
+					Side:      msg.Side,
 					Score:     score,
 					CreatedAt: time.Now().Format(time.RFC3339),
 				}
@@ -420,10 +415,6 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 					"Truth: %d/100\n"+
 					"Humor: %d/100\n"+
 					"Average: %.1f/100\n"+
-					"Agent1_support: %d/100\n"+
-					"Agent2_support: %d/100\n"+
-					"Agent1_role: %s\n"+
-					"Agent2_role: %s\n"+
 					"Explanation: %s\n",
 					score.Strength,
 					score.Relevance,
@@ -431,10 +422,6 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 					score.Truth,
 					score.Humor,
 					score.Average,
-					score.Agent1_support,
-					score.Agent2_support,
-					agent1Name,
-					agent2Name,
 					score.Explanation),
 			}); err != nil {
 				log.Printf("Failed to send score to user: %v", err)
@@ -448,10 +435,6 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 				"Truth: %d/100\n"+
 				"Humor: %d/100\n"+
 				"Average: %.1f/100\n"+
-				"Agent1_support: %d/100\n"+
-				"Agent2_support: %d/100\n"+
-				"agent1Name: %s\n"+
-				"agent2Name: %s\n"+
 				"Explanation: %s\n",
 				score.Strength,
 				score.Relevance,
@@ -459,23 +442,17 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 				score.Truth,
 				score.Humor,
 				score.Average,
-				score.Agent1_support,
-				score.Agent2_support,
-				agent1Name,
-				agent2Name,
 				score.Explanation)
 		}
 
-		delta, winner := decidePlayerVote(score.Agent1_support, score.Agent2_support, agent1Name, agent2Name)
-		if winner == agent1Name {
-			agent1Score = agent1Score + delta
-			agent2Score = agent2Score - delta
+		if msg.Side == agent1Name {
+			agent1Score = agent1Score + int(score.Average)
+			agent2Score = agent2Score - int(score.Average)
+		} else {
+			agent2Score = agent2Score + int(score.Average)
+			agent1Score = agent1Score - int(score.Average)
 		}
-		if winner == agent2Name {
-			agent2Score = agent2Score + delta
-			agent1Score = agent1Score - delta
-		}
-		log.Printf("%s scored %d points ", winner, delta)
+		log.Printf("%s scored %d points ", msg.Side, int(score.Average))
 
 		ws.WriteJSON(gin.H{
 			"type": "game_score",
