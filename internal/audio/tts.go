@@ -33,9 +33,10 @@ func (s *TTSService) GenerateAudio(ctx context.Context, text string) ([]byte, er
 	url := "https://api.openai.com/v1/audio/speech"
 
 	requestBody := map[string]interface{}{
-		"model": "tts-1",
-		"input": text,
-		"voice": s.voice,
+		"model":           "tts-1",
+		"input":           text,
+		"voice":           s.voice,
+		"response_format": "mp3",
 	}
 
 	jsonBody, err := json.Marshal(requestBody)

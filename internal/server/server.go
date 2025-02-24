@@ -7,9 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"math"
 	"net/http"
 	"strconv"
+
 	//"sort"
 	//"strings"
 	"sync"
@@ -197,11 +197,11 @@ func (s *Server) handleAudioStream(c *gin.Context) {
 		return
 	}
 
-	c.Header("Content-Type", "audio/aac")
+	c.Header("Content-Type", "audio/mpeg")
 	c.Header("Content-Length", fmt.Sprintf("%d", len(cache.data)))
 	c.Header("Cache-Control", "public, max-age=31536000")
 
-	c.Data(http.StatusOK, "audio/aac", cache.data)
+	c.Data(http.StatusOK, "audio/mpeg", cache.data)
 
 	go s.cleanupCache()
 }
@@ -302,8 +302,7 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 		s.pendingUserMessage = msg.Message
 		s.pendingUserMessageLock.Unlock()
 
-		// Add to conversation log
-		s.addToConversationLog("Player", msg.Message, true)
+		s.handlePlayerMessage(ws, msg)
 
 		log.Printf("User message received: %s", msg.Message)
 	}
@@ -337,67 +336,141 @@ func (s *Server) getNextAgent() *agent.Agent {
 
 func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage) {
 	// Add player message to conversation log
-	s.addToConversationLog("Player", msg.Message, true)
-
-	// Get conversation context
-	conversationContext := s.getConversationContext()
+	s.addToConversationLog("Player", msg.Message, true, msg.Topic)
 
 	// Generate responses from both agents
 	ctx := context.Background()
-	responses := make(map[string]string)
-	var wg sync.WaitGroup
-	var responseMutex sync.Mutex
 
-	for name, a := range s.agents {
-		wg.Add(1)
-		go func(agentName string, agent *agent.Agent) {
-			defer wg.Done()
+	// Get agent names
+	var agent1Name, agent2Name string
+	for name := range s.agents {
+		if agent1Name == "" {
+			agent1Name = name
+		} else {
+			agent2Name = name
+			break
+		}
+	}
 
-			prompt := fmt.Sprintf(`You are participating in a structured debate about whether bears or tigers are the superior predator.
+	// Score the user's message first
+	if s.scorer != nil {
+		log.Printf("\n=== Scoring User Message ===\n")
+		score, err := s.scorer.ScoreArgument(ctx, msg.Message, msg.Topic, agent1Name, agent2Name)
+		if err != nil {
+			log.Printf("Failed to score user message: %v", err)
+		} else {
+			// Save argument and score to database
+			argID, err := s.db.SaveArgument("player1", msg.Topic, msg.Message)
+			if err != nil {
+				log.Printf("Failed to save argument: %v", err)
+			} else {
+				if err := s.db.SaveScore(argID, score); err != nil {
+					log.Printf("Failed to save score: %v", err)
+				}
+			}
+
+			// Send score back to user
+			if err := ws.WriteJSON(gin.H{
+				"type": "score",
+				"message": fmt.Sprintf("Argument score:\n"+
+					"Strength: %d/100\n"+
+					"Relevance: %d/100\n"+
+					"Logic: %d/100\n"+
+					"Truth: %d/100\n"+
+					"Humor: %d/100\n"+
+					"Average: %.1f/100\n"+
+					"Agent1_support: %d/100\n"+
+					"Agent2_support: %d/100\n"+
+					"Explanation: %s\n",
+					score.Strength,
+					score.Relevance,
+					score.Logic,
+					score.Truth,
+					score.Humor,
+					score.Average,
+					score.Agent1_support,
+					score.Agent2_support,
+					score.Explanation),
+			}); err != nil {
+				log.Printf("Failed to send score to user: %v", err)
+			}
+			log.Printf("Raw Jason values in server.go are:\n")
+
+			log.Printf("Argument score:\n"+
+				"Strength: %d/100\n"+
+				"Relevance: %d/100\n"+
+				"Logic: %d/100\n"+
+				"Truth: %d/100\n"+
+				"Humor: %d/100\n"+
+				"Average: %.1f/100\n"+
+				"Agent1_support: %d/100\n"+
+				"Agent2_support: %d/100\n"+
+				"Explanation: %s\n",
+				score.Strength,
+				score.Relevance,
+				score.Logic,
+				score.Truth,
+				score.Humor,
+				score.Average,
+				score.Agent1_support,
+				score.Agent2_support,
+				score.Explanation)
+		}
+	}
+}
+
+func getPrompt(conversationContext string, playerMessage string, agentName string, agentRole string) string {
+	switch playerMessage {
+	case "":
+		return fmt.Sprintf(`You're in an EPIC SHOWDOWN debate about bears vs tigers!
 
 Current conversation context:
+%s
+
+You are %s, with the role of %s.
+
+TIME TO BRING THE HEAT! 🔥
+1. Use casual, high-energy language
+2. Drop some sick burns about the other predator
+3. Back up your trash talk with actual facts, but make them SOUND EPIC
+4. Be dramatic and entertaining
+5. Feel free to use slang, and modern expressions
+6. Get creative with your comebacks
+7. You are absolutely encouraged to make up fake stuff and exxagerate massively
+8. Be as creative as possible and use all your fantasy
+
+Remember: This is a fun, high-energy debate! Go wild with your arguments but keep it playful!`, conversationContext, agentName, agentRole)
+	default:
+		return fmt.Sprintf(`Current conversation context:
 %s
 
 A player has just said: "%s"
 
 You are %s, with the role of %s.
-Remember:
-1. Stay strictly focused on the bear vs tiger debate
-2. Use your expertise to support your position
-3. Reference specific facts and studies about your species
-5. Never deviate from the debate topic
-6. Be passionate but factual about your position
-7. The latest message is from the player
-8. You should respond to that Player message by repeating the points made in the message and then addressing them
+Generate a response that:
+1. Shows you understand the full conversation context
+2. Acknowledges the player's message
+3. Stays in character
+4. Maintains natural conversation flow
+5. Is brief but engaging
+6. Interacts with the other agent's previous messages when relevant
+7. Do not use smileys or emojis.
 
-Generate a response that maintains the debate focus and supports your position.`
-	case "continue_debate":
-		return `You are participating in a structured debate about whether bears or tigers are the superior predator.
+REMEMBER:
+1. Be SUPER PASSIONATE and use casual, fun language!
+2. Trash talk the other predator (but keep it playful)
+3. Use wild comparisons and metaphors
+4. Get creative with your boasting
+5. Feel free to use slang and modern expressions
+6. Be dramatic and over-the-top with your arguments
 
-Current conversation context:
-%s
+Examples of the tone we want:
+- "Bruh, have you SEEN a tiger's ninja moves? Your bear's like a clumsy bouncer at a club!"
+- "LOL! My grizzly would turn your tiger into a fancy striped carpet!"
+- "Yo, while your bear is doing the heavy lifting, my tiger's already finished their morning cardio AND got breakfast!"
+- "Seriously? A tiger? That's just a spicy housecat compared to my absolute unit of a bear!"
 
-You are %s, with the role of %s.
-
-Your task is to:
-1. Continue the debate about bears vs tigers as superior predators
-2. Use your expertise to present new arguments or expand on previous points
-3. Reference specific facts, studies, or observations about your species
-4. Challenge or address points made about the opposing predator
-5. Stay strictly focused on the debate topic
-6. Be passionate but factual in your arguments
-
-Key debate points to consider:
-- Physical strength and combat abilities
-- Hunting success rates and techniques
-- Territorial dominance
-- Survival skills and adaptability
-- Historical encounters and documented fights
-- Biological advantages and disadvantages
-
-Generate a response that advances the debate while maintaining scientific credibility.`
-	default:
-		return ""
+Keep it fun, keep it spicy, but make your points count!`, conversationContext, playerMessage, agentName, agentRole)
 	}
 }
 
@@ -410,8 +483,6 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 	if !isConnected {
 		return
 	}
-
-	isFirstMessage := true
 
 	for {
 		select {
@@ -438,20 +509,12 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 			s.pendingUserMessage = ""
 			s.pendingUserMessageLock.RUnlock()
 
-			promptType := "continue_debate"
-			if pendingMessage != "" {
-				promptType = "player_message"
-			}
-
 			ctx := context.Background()
-			prompt := fmt.Sprintf(getPrompt(promptType),
-				conversationContext,
-				agent.GetName(),
-				agent.GetRole())
+			prompt := getPrompt(conversationContext, pendingMessage, agent.GetName(), agent.GetRole())
 
 			// Time the response generation
 			responseStart := time.Now()
-			response, err := agent.GenerateResponse(ctx, topic, prompt)
+			response, err := agent.GenerateResponse(ctx, "Bear vs Tiger: Who is the superior predator?", prompt)
 			responseGenerationTime := time.Since(responseStart)
 			if err != nil {
 				log.Printf("Failed to generate response: %v", err)
@@ -459,7 +522,7 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 			}
 
 			// Add response to conversation log
-			s.addToConversationLog(agent.GetName(), response, false, topic)
+			s.addToConversationLog(agent.GetName(), response, false, "Bear vs Tiger: Who is the superior predator?")
 
 			// Send text response
 			if err := ws.WriteJSON(gin.H{
@@ -515,16 +578,13 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 				totalGenerationTime)
 
 			// Calculate delay
-			buffer := time.Duration(math.Min(audioDuration.Seconds()*0.2, 0.5) * float64(time.Second))
-			remainingDelay := audioDuration + buffer
-			if isFirstMessage {
-				remainingDelay -= totalGenerationTime
-				isFirstMessage = false
-			}
+			remainingDelay := audioDuration - totalGenerationTime
+			log.Printf("Remaining delay: %v", remainingDelay)
+			log.Printf("Total generation time: %v", totalGenerationTime)
 			// Only sleep if we need to wait more
 			if remainingDelay > 0 {
+				log.Printf("Waiting for %v before next message", remainingDelay)
 				time.Sleep(remainingDelay)
-				log.Printf("Waited for %v before next message", remainingDelay)
 			} else {
 				log.Printf("No delay needed, generation difference exceeds audio duration")
 			}
@@ -707,11 +767,11 @@ func (s *Server) analyzeConviction(ctx context.Context, ws *websocket.Conn) {
 	}
 }
 
-// getAudioDuration calculates the duration of AAC audio data
-// OpenAI TTS uses AAC-LC with 64kbps bitrate
+// getAudioDuration calculates the duration of MP3 audio data
+// This is an estimation based on typical MP3 bitrate of 128 kbps
 func getAudioDuration(audioData []byte) time.Duration {
-	// AAC-LC 64kbps = 8000 bytes per second
-	bytesPerSecond := 8000
+	// MP3 128kbps = 16000 bytes per second (average)
+	bytesPerSecond := 16000
 	seconds := float64(len(audioData)) / float64(bytesPerSecond)
 	return time.Duration(seconds * float64(time.Second))
 }
