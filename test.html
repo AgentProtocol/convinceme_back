@@ -185,6 +185,7 @@
             margin-top: 5px;
             text-align: right;
             font-style: italic;
+            line-height: 1.4;
         }
 
         .message.user .message-score {
@@ -232,6 +233,8 @@
         let audioChunks = [];
         let isRecording = false;
         let currentMessageScore = null;
+        let currentAgent1Score = 0;
+        let currentAgent2Score = 0;
 
         function updateAudioStatus(status) {
             document.getElementById('audioStatus').textContent = status;
@@ -270,9 +273,8 @@
             if (isUser && currentMessageScore !== null) {
                 const scoreSpan = document.createElement('div');
                 scoreSpan.className = 'message-score';
-                scoreSpan.textContent = `Argument Score: ${currentMessageScore.toFixed(1)}/100`;
+                scoreSpan.textContent = `Argument Score: ${currentMessageScore.toFixed(1)}/100 | Bear Support: ${currentAgent1Score}/100 | Tiger Support: ${currentAgent2Score}/100`;
                 messageDiv.appendChild(scoreSpan);
-                // Reset the score after using it
                 currentMessageScore = null;
             }
 
@@ -417,11 +419,16 @@
             }
 
             if (data.type === 'score' && data.message) {
-                // Extract average score using regex
+                // Extract scores using regex
                 const avgMatch = data.message.match(/Average:\s*([\d.]+)/);
+                const agent1Match = data.message.match(/Agent1_support:\s*(\d+)/);
+                const agent2Match = data.message.match(/Agent2_support:\s*(\d+)/);
+
                 if (avgMatch) {
                     currentMessageScore = parseFloat(avgMatch[1]);
-                    // Now that we have the score, add the user's message
+                    currentAgent1Score = agent1Match ? parseInt(agent1Match[1]) : 0;
+                    currentAgent2Score = agent2Match ? parseInt(agent2Match[1]) : 0;
+
                     if (window.lastUserMessage) {
                         addMessage(window.lastUserMessage, true);
                         window.lastUserMessage = null;
