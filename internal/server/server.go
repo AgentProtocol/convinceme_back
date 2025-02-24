@@ -418,28 +418,40 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 		}
 	}
 }
-
+// This is the initial prompt when there's no player message (empty string)
 func getPrompt(conversationContext string, playerMessage string, agentName string, agentRole string) string {
 	switch playerMessage {
 	case "":
-		return fmt.Sprintf(`You're in an EPIC SHOWDOWN debate about bears vs tigers!
-
-Current conversation context:
-%s
+		return fmt.Sprintf(`Current conversation context: %s
 
 You are %s, with the role of %s.
+Generate a response that:
+1. Shows you understand the full conversation context
+2. Acknowledges the player's message if there is one
+3. Stays in character
+4. Maintains natural conversation flow
+5. Is brief but engaging
+6. Interacts with the other agent's previous messages when relevant
+7. Do not use smileys or emojis.
+8. Keep it short and concise and only use two or three easy to understand and short sentences.
 
-TIME TO BRING THE HEAT! 🔥
-1. Use casual, high-energy language
-2. Drop some sick burns about the other predator
-3. Back up your trash talk with actual facts, but make them SOUND EPIC
-4. Be dramatic and entertaining
-5. Feel free to use slang, and modern expressions
-6. Get creative with your comebacks
-7. You are absolutely encouraged to make up fake stuff and exxagerate massively
-8. Be as creative as possible and use all your fantasy
+REMEMBER:
+1. Be SUPER PASSIONATE and use casual, fun language!
+2. Trash talk the other predator (but keep it playful)
+3. Use wild comparisons and metaphors
+4. Get creative with your boasting
+5. Feel free to use slang and modern expressions
+6. Be dramatic and over-the-top with your arguments
+7. Keep it short 2-3 sentences maximum. Ideally only one punch line sentence.
 
-Remember: This is a fun, high-energy debate! Go wild with your arguments but keep it playful!`, conversationContext, agentName, agentRole)
+Examples of the tone we want:
+- "Bruh, have you SEEN a tiger's ninja moves? Your bear's like a clumsy bouncer at a club!"
+- "LOL! My grizzly would turn your tiger into a fancy striped carpet!"
+- "Yo, while your bear is doing the heavy lifting, my tiger's already finished their morning cardio AND got breakfast!"
+- "Seriously? A tiger? That's just a spicy housecat compared to my absolute unit of a bear!"
+
+Keep it fun, keep it spicy, but make your points count!`, conversationContext, agentName, agentRole)
+// This is the prompt when there's a player message
 	default:
 		return fmt.Sprintf(`Current conversation context:
 %s
@@ -463,6 +475,7 @@ REMEMBER:
 4. Get creative with your boasting
 5. Feel free to use slang and modern expressions
 6. Be dramatic and over-the-top with your arguments
+7. Keep it short 2-3 sentences maximum. Ideally only one punch line sentence.
 
 Examples of the tone we want:
 - "Bruh, have you SEEN a tiger's ninja moves? Your bear's like a clumsy bouncer at a club!"
