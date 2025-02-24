@@ -131,7 +131,7 @@ func (d *Database) GetAllArguments() ([]*Argument, error) {
 		var score scoring.ArgumentScore
 
 		err := rows.Scan(
-			&arg.ID, &arg.PlayerID, &arg.Topic, &arg.Content, &arg.CreatedAt,
+			&arg.ID, &arg.PlayerID, &arg.Topic, &arg.Content, &arg.Side, &arg.CreatedAt,
 			&score.Strength, &score.Relevance, &score.Logic, &score.Truth, &score.Humor,
 			&score.Average, &score.Explanation,
 		)
