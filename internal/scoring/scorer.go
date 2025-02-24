@@ -12,17 +12,17 @@ import (
 )
 
 type ArgumentScore struct {
-	Strength    int     `json:"strength"`    // Support for position (0-100)
-	Relevance   int     `json:"relevance"`   // Relevance to discussion (0-100)
-	Logic       int     `json:"logic"`       // Logical structure (0-100)
-	Truth       int     `json:"truth"`       // Factual accuracy (0-100)
-	Humor       int     `json:"humor"`       // Entertainment value (0-100)
-	Average     float64 `json:"average"`     // Average of all scores
-	Agent1_support int	`json:"Agent1_support"` // Level of support for agent 1(0-100)
-	Agent2_support int	`json:"Agent2_support"` // Level of support for agent 2(0-100)
-	Agent1_role string	`json:"Agent1_role"` // Role of agent 1 
-	Agent2_role string	`json:"Agent2_role"` // Role of agent 2 
-	Explanation string  `json:"explanation"` // Brief explanation
+	Strength       int     `json:"strength"`       // Support for position (0-100)
+	Relevance      int     `json:"relevance"`      // Relevance to discussion (0-100)
+	Logic          int     `json:"logic"`          // Logical structure (0-100)
+	Truth          int     `json:"truth"`          // Factual accuracy (0-100)
+	Humor          int     `json:"humor"`          // Entertainment value (0-100)
+	Average        float64 `json:"average"`        // Average of all scores
+	Agent1_support int     `json:"Agent1_support"` // Level of support for agent 1(0-100)
+	Agent2_support int     `json:"Agent2_support"` // Level of support for agent 2(0-100)
+	Agent1_role    string  `json:"Agent1_role"`    // Role of agent 1
+	Agent2_role    string  `json:"Agent2_role"`    // Role of agent 2
+	Explanation    string  `json:"explanation"`    // Brief explanation
 }
 
 type Scorer struct {
@@ -66,7 +66,7 @@ Your response MUST ONLY be a valid JSON object with the following structure. Don
 	"Agent1_support": <0-100>,
     "Agent2_support": <0-100>,
     "Explanation": "<brief explanation of scores>"
-}`, topic, argument, agent1Name, agent2Name, agent1Name, agent2Name)
+}`, topic, argument, agent1Name, agent1Name, agent2Name, agent2Name)
 
 	completion, err := s.llm.Call(ctx, prompt)
 	if err != nil {
