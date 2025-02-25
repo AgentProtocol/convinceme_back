@@ -97,7 +97,7 @@ var upgrader = websocket.Upgrader{
 const (
 	TIGER_AGENT = "'Fundamentals First' Florentin"
 	BEAR_AGENT  = "'Memecoin Supercycle' Murad"
-	MAX_SCORE   = 420
+	MAX_SCORE   = 200
 )
 
 var agent1Score int = MAX_SCORE / 2
@@ -487,7 +487,7 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 	// Score the user's message first
 	if s.scorer != nil {
 		log.Printf("\n=== Scoring User Message ===\n")
-		score, agent1Name, agent2Name, err := s.scorer.ScoreArgument(ctx, msg.Message, msg.Topic, agent1Name, agent2Name)
+		score, err := s.scorer.ScoreArgument(ctx, msg.Message, msg.Topic)
 		if err != nil {
 			log.Printf("Failed to score user message: %v", err)
 		} else {
@@ -839,6 +839,39 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn, conversationID int)
 			}
 
 			audioDuration := getAudioDuration(audioData)
+			go func() {
+				// Wait for the audio to finish
+				time.Sleep(audioDuration)
+				
+				// Now score the response
+				score, err := s.scorer.ScoreArgument(ctx, response, "Bear vs Tiger: Who would win in a fight?")
+				if err != nil {
+					log.Printf("Error scoring response: %v", err)
+					return
+				}
+				// Agents arguments are two times less impactful as compared to the player's
+				if (agent.GetName() == TIGER_AGENT) {
+					agent1Score = agent1Score + int(score.Average)/2
+					agent2Score = agent2Score - int(score.Average)/2
+				} else {
+					agent2Score = agent2Score + int(score.Average)/2
+					agent1Score = agent1Score - int(score.Average)/2
+				}
+				log.Printf("------------------>%s scored %d points <---------------", agent.GetName(), int(score.Average))
+		
+				ws.WriteJSON(gin.H{
+					"type": "game_score",
+					"gameScore": gin.H{
+						TIGER_AGENT: agent1Score,
+						BEAR_AGENT: agent2Score,
+					},
+				})
+				
+			
+				// Handle the score result here
+				log.Printf("Score calculated after audio delay: %v", score)
+			}()
+
 			audioID := fmt.Sprintf("%s_%d", agent.GetName(), time.Now().UnixNano())
 
 			s.cacheMutex.Lock()

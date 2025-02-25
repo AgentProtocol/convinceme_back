@@ -37,12 +37,12 @@ func NewScorer(apiKey string) (*Scorer, error) {
 	return &Scorer{llm: llm}, nil
 }
 
-func (s *Scorer) ScoreArgument(ctx context.Context, argument, topic string, agent1Name, agent2Name string) (*ArgumentScore, string, string, error) {
+func (s *Scorer) ScoreArgument(ctx context.Context, argument, topic string) (*ArgumentScore, error) {
 	prompt := fmt.Sprintf(`Evaluate this argument about "%s":
 
 "%s"
 
-Score each aspect from 0-100 and explain why:
+Score each aspect from 0-10 and explain why:
 - Strength: How well it supports their position
 - Relevance: How relevant to the discussion
 - Logic: Quality of reasoning and structure
@@ -52,17 +52,17 @@ Score each aspect from 0-100 and explain why:
 
 
 Your response MUST ONLY be a valid JSON object with the following structure. Dont write the word json, just output a correct json-formatted object, starting with a { symbol
-    "strength": <0-100>,
-    "relevance": <0-100>,
-    "logic": <0-100>,
-    "truth": <0-100>,
-    "humor": <0-100>,
+    "strength": <0-10>,
+    "relevance": <0-10>,
+    "logic": <0-10>,
+    "truth": <0-10>,
+    "humor": <0-10>,
     "Explanation": "<brief explanation of scores>"
 }`, topic, argument)
 
 	completion, err := s.llm.Call(ctx, prompt)
 	if err != nil {
-		return nil, "", "", fmt.Errorf("scoring failed: %v", err)
+		return nil, fmt.Errorf("scoring failed: %v", err)
 	}
 
 	completion = strings.TrimSpace(completion)
@@ -73,13 +73,13 @@ Your response MUST ONLY be a valid JSON object with the following structure. Don
 
 	var score ArgumentScore
 	if err := json.Unmarshal([]byte(completion), &score); err != nil {
-		return nil, "", "", fmt.Errorf("failed to parse score: %v\nraw response: %s", err, completion)
+		return nil, fmt.Errorf("failed to parse score: %v\nraw response: %s", err, completion)
 	}
 
 	// Calculate average
 	score.Average = float64(score.Strength+score.Relevance+score.Logic+score.Truth+score.Humor) / 5.0
 
-	return &score, agent1Name, agent2Name, nil
+	return &score, nil
 }
 
 func truncateString(s string, length int) string {
