@@ -42,26 +42,26 @@ type Server struct {
 	config             *Config
 	scorer             *scoring.Scorer
 	db                 *database.Database
-	// New fields for continuous discussion
-	isUserConnected bool
-	connectedMutex  sync.RWMutex
-	userMessages    chan string
-	stopDiscussion  chan struct{}
-	lastAudioStart  time.Time
-	requiredDelay   time.Duration
-	// Field to track pending user message
+	// Connection-related fields with single mutex
+	connectionMutex     sync.RWMutex
+	clients             map[*websocket.Conn]string // Map of WebSocket connections to player IDs
+	conversationStarted bool
+	stopDiscussion      chan struct{}
+	// Add new fields for tracking conversation state
+	conversationID int
+	conversationWg sync.WaitGroup
+	// Add a dedicated lock for conversation state transitions
+	conversationStateMutex sync.Mutex
+	// Other fields
+	userMessages           chan string
+	lastAudioStart         time.Time
+	requiredDelay          time.Duration
 	pendingUserMessage     string
 	pendingUserMessageLock sync.RWMutex
-	// New fields for managing multiple clients
-	clients    map[*websocket.Conn]string // Map of WebSocket connections to player IDs
-	clientsMux sync.RWMutex
-	// Track player queue numbers
-	playerQueue    map[string]int // Map of player IDs to their queue numbers
-	playerQueueMux sync.RWMutex
-	nextQueueNum   int // Next available queue number
-	// Add shared conversation instance
-	sharedConversation *conversation.Conversation
-	conversationStarted bool
+	playerQueue            map[string]int // Map of player IDs to their queue numbers
+	playerQueueMux         sync.RWMutex
+	nextQueueNum           int // Next available queue number
+	sharedConversation     *conversation.Conversation
 }
 
 type ConversationEntry struct {
@@ -160,7 +160,6 @@ func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey str
 		requiredDelay:  0,
 		// Initialize clients map and player queue tracking
 		clients:      make(map[*websocket.Conn]string),
-		clientsMux:   sync.RWMutex{},
 		playerQueue:  make(map[string]int),
 		nextQueueNum: 1,
 		// Initialize shared conversation
@@ -172,6 +171,10 @@ func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey str
 			apiKey,
 		),
 		conversationStarted: false,
+		// Initialize conversation tracking fields
+		conversationID:         0,
+		conversationWg:         sync.WaitGroup{},
+		conversationStateMutex: sync.Mutex{},
 	}
 
 	router.GET("/ws/conversation", server.handleConversationWebSocket)
@@ -195,6 +198,7 @@ func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey str
 		}
 	})
 
+	log.Printf("Server initialized with %d agents", len(agents))
 	return server
 }
 
@@ -275,37 +279,66 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 	}
 	defer ws.Close()
 
-	// Add client to the clients map
-	s.clientsMux.Lock()
-	s.clients[ws] = "" // Initially empty player ID
-	s.clientsMux.Unlock()
+	// Lock the conversation state to check if we can start a new one
+	s.conversationStateMutex.Lock()
 
-	// Set user as connected and start conversation if not already started
-	s.connectedMutex.Lock()
-	s.isUserConnected = true
+	// Add client to map first (always do this)
+	s.connectionMutex.Lock()
+	s.clients[ws] = "" // Initially empty player ID
+	s.connectionMutex.Unlock()
+
+	// Check if conversation needs to be started
+	var startConversation bool
+	var currentConversationID int
+
 	if !s.conversationStarted {
 		s.conversationStarted = true
-		// Create a new stop channel for the first connection
+		startConversation = true
+		// Increment conversation ID to ensure unique identification
+		s.conversationID++
+		currentConversationID = s.conversationID
+		// Create a new stop channel
 		s.stopDiscussion = make(chan struct{})
-		// Start continuous discussion in a separate goroutine
-		go s.continueAgentDiscussion(ws)
+		log.Printf("Starting new conversation with ID: %d", currentConversationID)
+	} else {
+		currentConversationID = s.conversationID
+		log.Printf("Client joined existing conversation with ID: %d", currentConversationID)
 	}
-	s.connectedMutex.Unlock()
+
+	// Start conversation outside the locks if needed
+	if startConversation {
+		s.conversationWg.Add(1)
+		go func() {
+			defer s.conversationWg.Done()
+			s.continueAgentDiscussion(ws, currentConversationID)
+		}()
+	}
+
+	// Release the state lock now that we've decided what to do
+	s.conversationStateMutex.Unlock()
 
 	// Ensure cleanup on disconnect
 	defer func() {
-		s.clientsMux.Lock()
+		// Lock to prevent race conditions during cleanup
+		s.conversationStateMutex.Lock()
+		defer s.conversationStateMutex.Unlock()
+
+		s.connectionMutex.Lock()
 		delete(s.clients, ws)
 		remaining := len(s.clients)
-		s.clientsMux.Unlock()
+		s.connectionMutex.Unlock()
 
 		// Only stop conversation if this was the last client
-		if remaining == 0 {
-			s.connectedMutex.Lock()
-			s.isUserConnected = false
+		if remaining == 0 && s.conversationStarted {
+			log.Printf("Last client disconnected. Stopping conversation ID: %d", s.conversationID)
 			s.conversationStarted = false
 			close(s.stopDiscussion)
-			s.connectedMutex.Unlock()
+
+			// Wait for conversation goroutine to fully terminate
+			// This happens while holding the state lock to prevent new conversations from starting
+			log.Printf("Waiting for conversation ID %d to terminate...", s.conversationID)
+			s.conversationWg.Wait()
+			log.Printf("Conversation ID %d fully terminated", s.conversationID)
 		}
 	}()
 
@@ -350,9 +383,9 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 
 		// Update player ID in clients map and assign queue number if not set
 		if msg.PlayerID != "" {
-			s.clientsMux.Lock()
+			s.connectionMutex.Lock()
 			s.clients[ws] = msg.PlayerID
-			s.clientsMux.Unlock()
+			s.connectionMutex.Unlock()
 
 			// Assign queue number if not already assigned
 			s.playerQueueMux.Lock()
@@ -387,9 +420,9 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 		s.playerQueueMux.Unlock()
 
 		s.broadcastMessage(gin.H{
-			"type": "message",
-			"content": msg.Message,
-			"agent": msg.PlayerID,
+			"type":        "message",
+			"content":     msg.Message,
+			"agent":       msg.PlayerID,
 			"queueNumber": queueNum,
 		})
 
@@ -401,8 +434,8 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 
 // Add a new method to broadcast messages to all connected clients
 func (s *Server) broadcastMessage(message interface{}) {
-	s.clientsMux.RLock()
-	defer s.clientsMux.RUnlock()
+	s.connectionMutex.RLock()
+	defer s.connectionMutex.RUnlock()
 
 	// Iterate through all connected clients and send the message
 	for client := range s.clients {
@@ -621,31 +654,90 @@ Keep it fun, keep it spicy, but make your points count!`, conversationContext, p
 	}
 }
 
-func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
-	// Check if user is connected
-	s.connectedMutex.RLock()
-	isConnected := s.isUserConnected
-	s.connectedMutex.RUnlock()
+func (s *Server) continueAgentDiscussion(ws *websocket.Conn, conversationID int) {
+	log.Printf("Starting agent discussion for conversation ID: %d", conversationID)
 
-	if !isConnected {
+	// Check if conversation is still active
+	s.connectionMutex.RLock()
+	active := s.conversationStarted && conversationID == s.conversationID
+	hasClients := len(s.clients) > 0
+	s.connectionMutex.RUnlock()
+
+	if !active || !hasClients {
+		log.Printf("Conversation %d not active or no clients. Exiting.", conversationID)
 		return
 	}
 
+	log.Printf("Conversation %d is active with %d clients", conversationID, len(s.clients))
 	isfirstmessage := true
 
 	for {
+		// Recheck conversation status at the start of each loop
+		s.connectionMutex.RLock()
+		active := s.conversationStarted && conversationID == s.conversationID
+		hasClients := len(s.clients) > 0
+		clientCount := len(s.clients)
+		s.connectionMutex.RUnlock()
+
+		if !active || !hasClients {
+			log.Printf("Conversation %d no longer active or no clients (%d). Exiting loop.", conversationID, clientCount)
+			return
+		}
+
 		select {
 		case <-s.stopDiscussion:
+			log.Printf("Stop signal received for conversation %d", conversationID)
 			return
 		default:
+			// Check if conversation is still the current one
+			s.connectionMutex.RLock()
+			isCurrentConversation := conversationID == s.conversationID && s.conversationStarted
+			s.connectionMutex.RUnlock()
+
+			if !isCurrentConversation {
+				log.Printf("Conversation %d is no longer the current conversation (current is %d). Exiting.",
+					conversationID, s.conversationID)
+				return
+			}
+
 			// Check if enough time has passed since last audio
 			timeSinceLastAudio := time.Since(s.lastAudioStart)
 
 			if timeSinceLastAudio < s.requiredDelay {
 				isfirstmessage = false
 				waitTime := s.requiredDelay - timeSinceLastAudio
-				log.Printf("Waiting %v before next message", waitTime)
-				time.Sleep(waitTime)
+				log.Printf("Conversation %d: Waiting %v before next message", conversationID, waitTime)
+
+				// Instead of a single long sleep, break it into smaller sleeps
+				// and check if we should continue after each one
+				sleepIncrement := 500 * time.Millisecond
+				for timeLeft := waitTime; timeLeft > 0; timeLeft -= sleepIncrement {
+					sleepDuration := sleepIncrement
+					if timeLeft < sleepIncrement {
+						sleepDuration = timeLeft
+					}
+					time.Sleep(sleepDuration)
+
+					// Check if we should exit during sleep
+					select {
+					case <-s.stopDiscussion:
+						log.Printf("Stop signal received for conversation %d during wait", conversationID)
+						return
+					default:
+						// Continue waiting
+					}
+
+					// Check if conversation is still valid
+					s.connectionMutex.RLock()
+					stillValid := conversationID == s.conversationID && s.conversationStarted
+					stillHasClients := len(s.clients) > 0
+					s.connectionMutex.RUnlock()
+
+					if !stillValid || !stillHasClients {
+						log.Printf("Conversation %d is no longer valid during wait. Exiting.", conversationID)
+						return
+					}
+				}
 			} else {
 				isfirstmessage = true
 			}
