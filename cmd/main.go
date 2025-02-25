@@ -47,14 +47,14 @@ func main() {
 	}
 
 	// Load agent configurations from JSON files
-	agent1Config, err := agent.LoadAgentConfig("internal/agent/grizzly.json")
+	agent1Config, err := agent.LoadAgentConfig("internal/agent/degenerate.json")
 	if err != nil {
-		logger.Fatalf("Failed to load grizzly config: %v", err)
+		logger.Fatalf("Failed to load degenerate config: %v", err)
 	}
 
-	agent2Config, err := agent.LoadAgentConfig("internal/agent/tiger.json")
+	agent2Config, err := agent.LoadAgentConfig("internal/agent/midcurver.json")
 	if err != nil {
-		logger.Fatalf("Failed to load tiger config: %v", err)
+		logger.Fatalf("Failed to load midcurver config: %v", err)
 	}
 
 	// Create agents
@@ -72,7 +72,7 @@ func main() {
 	inputHandler := player.NewInputHandler(logger)
 
 	// Define the debate topic with explicit initial context
-	commonTopic := "Grizzly bears vs Tigers - who would win a fight?"
+	commonTopic := "Are memecoins net negative or positive for the crypto space?"
 
 	// Create conversation configuration
 	convConfig := conversation.ConversationConfig{

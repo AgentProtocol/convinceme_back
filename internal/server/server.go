@@ -86,8 +86,8 @@ var upgrader = websocket.Upgrader{
 
 // Define constants for agent roles
 const (
-	TIGER_AGENT = "Tony 'The Tiger King' Chen"
-	BEAR_AGENT  = "Mike 'Grizzly' Johnson"
+	TIGER_AGENT = "'Fundamentals First' Florentin"
+	BEAR_AGENT  = "'Memecoin Supercycle' Murad"
 	MAX_SCORE   = 420
 )
 
@@ -471,6 +471,37 @@ func getPrompt(conversationContext string, playerMessage string, agentName strin
 		return fmt.Sprintf(`Current conversation context: %s
 
 You are %s, with the role of %s.
+Topic: Are memecoins net negative or positive for the crypto space?
+
+Generate a response that:
+1. Focuses on one specific argument about memecoin impact
+2. Uses concrete examples or data to support your position
+3. Directly addresses previous points when relevant
+4. Maintains professionalism while being engaging
+5. Keeps responses concise (1-2 sentences maximum)
+
+DEBATE GUIDELINES:
+1. Focus on facts and market impact
+2. Reference specific events or metrics
+3. Avoid excessive slang or emojis
+4. Make clear, logical arguments
+5. Stay on topic about memecoin impact
+
+Example responses:
+Pro-Memecoin:
+- "The data shows memecoins brought 2 million new users to crypto in 2023, with 40% moving to DeFi within six months."
+- "While traditional finance ignores retail, memecoins have generated unprecedented engagement, with Dogecoin alone bringing 4 million new wallets into the ecosystem."
+
+Anti-Memecoin:
+- "Recent analysis shows 72% of memecoin traders lost money in 2023, with total retail losses exceeding $2 billion."
+- "The regulatory backlash from memecoin speculation has delayed critical crypto legislation in three major markets."
+
+Keep responses focused on the core debate about memecoin impact on crypto.`, conversationContext, agentName, agentRole)
+		// This is the prompt when there's a player message
+	default:
+		return fmt.Sprintf(`Current conversation context: %s
+
+You are %s, with the role of %s.
 Generate a response that:
 1. Shows you understand the full conversation context
 2. Acknowledges the player's message if there is one
@@ -478,59 +509,30 @@ Generate a response that:
 4. Maintains natural conversation flow
 5. Is brief but engaging
 6. Interacts with the other agent's previous messages when relevant
-7. Do not use smileys or emojis.
-8. Keep it short and concise and only use maximally two short sentences.
+7. Keep it short and concise and only use maximally two short sentences
+8. Use your character's specific crypto slang and terminology
 
 REMEMBER:
-1. Be SUPER PASSIONATE and use casual, fun language!
-2. Trash talk the other predator (but keep it playful)
-3. Use wild comparisons and metaphors
-4. Get creative with your boasting
-5. Feel free to use slang and modern expressions
-6. Be dramatic and over-the-top with your arguments
-7. Keep it short 2 sentences maximum. This is a MUST obey condition.
-8. Ideally try to limit it to only one punch line sentence.
+1. Be PASSIONATE about your stance on memecoins!
+2. Challenge the other person's viewpoint (but keep it playful)
+3. Use crypto-specific metaphors and comparisons
+4. Reference actual protocols, metrics, or memes depending on your character
+5. Use your character's signature language style
+6. Make your arguments memorable and punchy
+7. Keep it short - 2 sentences maximum. This is a MUST obey condition.
+8. Ideally try to limit it to one powerful statement.
 
 Examples of the tone we want:
-- "Bruh, have you SEEN a tiger's ninja moves? Your bear's like a clumsy bouncer at a club!"
-- "LOL! My grizzly would turn your tiger into a fancy striped carpet!"
-- "Yo, while your bear is doing the heavy lifting, my tiger's already finished their morning cardio AND got breakfast!"
-- "Seriously? A tiger? That's just a spicy housecat compared to my absolute unit of a bear!"
+For the Degen:
+- "Ser, while you're reading whitepapers, my $PEPE bag just did a 100x - this is what mass adoption looks like!"
+- "NGMI with that boomer mentality, memecoins are literally onboarding more users than your precious L2s!"
 
-Keep it fun, keep it spicy, but make your points count!`, conversationContext, agentName, agentRole)
-		// This is the prompt when there's a player message
-	default:
-		return fmt.Sprintf(`Current conversation context:
-%s
+For the Analyst:
+- "Your 'community-driven' memecoin just rugged faster than you can say 'sustainable tokenomics'"
+- "While you're chasing pumps, actual DeFi protocols generated $69M in real revenue last month"
+- "Memecoins are a scam and a waste of time and literally bankrupted thousands of people"
 
-A player has just said: "%s"
-
-You are %s, with the role of %s.
-Generate a response that:
-1. Shows you understand the full conversation context
-2. Acknowledges the player's message
-3. Stays in character
-4. Maintains natural conversation flow
-5. Is brief but engaging
-6. Interacts with the other agent's previous messages when relevant
-7. Do not use smileys or emojis.
-
-REMEMBER:
-1. Be SUPER PASSIONATE and use casual, fun language!
-2. Trash talk the other predator (but keep it playful)
-3. Use wild comparisons and metaphors
-4. Get creative with your boasting
-5. Feel free to use slang and modern expressions
-6. Be dramatic and over-the-top with your arguments
-7. Keep it short 2-3 sentences maximum. Ideally only one punch line sentence.
-
-Examples of the tone we want:
-- "Bruh, have you SEEN a tiger's ninja moves? Your bear's like a clumsy bouncer at a club!"
-- "LOL! My grizzly would turn your tiger into a fancy striped carpet!"
-- "Yo, while your bear is doing the heavy lifting, my tiger's already finished their morning cardio AND got breakfast!"
-- "Seriously? A tiger? That's just a spicy housecat compared to my absolute unit of a bear!"
-
-Keep it fun, keep it spicy, but make your points count!`, conversationContext, playerMessage, agentName, agentRole)
+Keep it spicy, keep it authentic to your character, but make your points count!`, conversationContext, playerMessage, agentName, agentRole)
 	}
 }
 
@@ -588,7 +590,7 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 
 			// Time the response generation
 			responseStart := time.Now()
-			response, err := agent.GenerateResponse(ctx, "Bear vs Tiger: Who is the superior predator?", prompt)
+			response, err := agent.GenerateResponse(ctx, "Are memecoins net negative or positive for the crypto space?", prompt)
 			responseGenerationTime := time.Since(responseStart)
 			if err != nil {
 				log.Printf("Failed to generate response: %v", err)
@@ -596,7 +598,7 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 			}
 
 			// Add response to conversation log
-			s.addToConversationLog(agent.GetName(), response, false, "Bear vs Tiger: Who is the superior predator?")
+			s.addToConversationLog(agent.GetName(), response, false, "Are memecoins net negative or positive for the crypto space?")
 
 			// Send text response
 			if err := ws.WriteJSON(gin.H{

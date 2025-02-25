@@ -94,7 +94,7 @@ api-start-debate:
 	@echo "\nStarting new debate session:"
 	@curl -s -X POST http://localhost:$(PORT)/api/conversation/start \
 		-H "Content-Type: application/json" \
-		-d '{"topic": "Bear vs Tiger: Who is the superior predator?"}' | jq '.'
+		-d '{"topic": "Are memecoins net negative or positive for the crypto space?"}' | jq '.'
 
 # Kill server if port is in use
 .PHONY: kill-server
