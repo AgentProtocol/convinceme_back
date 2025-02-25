@@ -662,7 +662,7 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 			audioData, err := agent.GenerateAndStreamAudio(ctx, response)
 			audioGenerationTime := time.Since(audioStart)
 			if err != nil {
-				log.Printf("Failed to generate audio: %v", err)
+				log.Printf("Failed to generate audio server: %v", err)
 				continue
 			}
 

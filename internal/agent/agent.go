@@ -50,14 +50,14 @@ type Agent struct {
 }
 
 // NewAgent creates a new AI agent with the specified configuration
-func NewAgent(apiKey string, config AgentConfig) (*Agent, error) {
+func NewAgent(openAIKey string, elevenLabsKey string, config AgentConfig) (*Agent, error) {
 	if !config.Voice.IsValid() {
-		config.Voice = types.VoiceAlloy // fallback to alloy if invalid
+		config.Voice = types.VoiceMark // fallback to alloy if invalid
 	}
 
 	// Configure OpenAI client options
 	opts := []openai.Option{
-		openai.WithToken(apiKey),
+		openai.WithToken(openAIKey),
 		openai.WithModel("gpt-4o-mini"),
 	}
 
@@ -67,7 +67,8 @@ func NewAgent(apiKey string, config AgentConfig) (*Agent, error) {
 		return nil, fmt.Errorf("failed to create LLM: %v", err)
 	}
 
-	tts, err := audio.NewTTSService(apiKey, config.Voice.String())
+	// Use ElevenLabs key for TTS
+	tts, err := audio.NewTTSService(elevenLabsKey, config.Voice.String())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create TTS service: %v", err)
 	}
@@ -188,9 +189,6 @@ func (a *Agent) GenerateAndStreamAudio(ctx context.Context, text string) ([]byte
 	if err != nil {
 		return nil, err
 	}
-
-	// Log the generated audio
-	log.Printf("Generated audio for %s: %d bytes", a.config.Name, len(audioData))
 
 	return audioData, nil
 }

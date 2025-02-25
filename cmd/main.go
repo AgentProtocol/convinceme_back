@@ -25,9 +25,15 @@ func main() {
 		logger.Fatalf("Error loading .env file: %v", err)
 	}
 
-	apiKey := os.Getenv("OPENAI_API_KEY")
-	if apiKey == "" {
+	// Get both API keys
+	openAIKey := os.Getenv("OPENAI_API_KEY")
+	if openAIKey == "" {
 		logger.Fatalf("OPENAI_API_KEY is not set in the environment variables")
+	}
+
+	elevenLabsKey := os.Getenv("ELEVENLABS_API_KEY")
+	if elevenLabsKey == "" {
+		logger.Fatalf("ELEVENLABS_API_KEY is not set in the environment variables")
 	}
 
 	// Check if HTTPS should be used
@@ -57,13 +63,13 @@ func main() {
 		logger.Fatalf("Failed to load midcurver config: %v", err)
 	}
 
-	// Create agents
-	agent1, err := agent.NewAgent(apiKey, agent1Config)
+	// Create agents with both API keys
+	agent1, err := agent.NewAgent(openAIKey, elevenLabsKey, agent1Config)
 	if err != nil {
 		logger.Fatalf("Failed to create agent1: %v", err)
 	}
 
-	agent2, err := agent.NewAgent(apiKey, agent2Config)
+	agent2, err := agent.NewAgent(openAIKey, elevenLabsKey, agent2Config)
 	if err != nil {
 		logger.Fatalf("Failed to create agent2: %v", err)
 	}
@@ -85,7 +91,7 @@ func main() {
 	}
 
 	// Create a new conversation with the common topic
-	conv := conversation.NewConversation(agent1, agent2, convConfig, inputHandler, apiKey)
+	conv := conversation.NewConversation(agent1, agent2, convConfig, inputHandler, openAIKey)
 
 	// Create agents map
 	agents := map[string]*agent.Agent{
@@ -93,15 +99,16 @@ func main() {
 		agent2Config.Name: agent2,
 	}
 
-	// Create server configuration
+	// Update server config to include both API keys
 	serverConfig := &server.Config{
 		Port:          ":8080",
-		OpenAIKey:     apiKey,
+		OpenAIKey:     openAIKey,
+		ElevenLabsKey: elevenLabsKey,  // Add ElevenLabs key
 		ResponseDelay: 500,
 	}
 
 	// Create and start the server
-	srv := server.NewServer(agents, db, apiKey, useHTTPS, serverConfig)
+	srv := server.NewServer(agents, db, openAIKey, useHTTPS, serverConfig)
 	logger.Printf("Starting server on %s...", serverConfig.Port)
 	if err := srv.Run(serverConfig.Port); err != nil {
 		logger.Fatalf("Server failed: %v", err)
