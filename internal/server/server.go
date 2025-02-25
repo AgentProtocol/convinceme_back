@@ -10,13 +10,12 @@ import (
 	"log"
 	"net/http"
 	"strconv"
-
-	//"sort"
-	//"strings"
 	"sync"
 	"time"
 
 	"github.com/neo/convinceme_backend/internal/audio"
+	"github.com/neo/convinceme_backend/internal/conversation"
+	"github.com/neo/convinceme_backend/internal/player"
 	"github.com/quic-go/quic-go/http3"
 	"github.com/tcolgate/mp3"
 
@@ -60,6 +59,9 @@ type Server struct {
 	playerQueue    map[string]int // Map of player IDs to their queue numbers
 	playerQueueMux sync.RWMutex
 	nextQueueNum   int // Next available queue number
+	// Add shared conversation instance
+	sharedConversation *conversation.Conversation
+	conversationStarted bool
 }
 
 type ConversationEntry struct {
@@ -127,6 +129,20 @@ func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey str
 		c.Next()
 	})
 
+	// Create input handler for the shared conversation
+	inputHandler := player.NewInputHandler(log.Default())
+
+	// Get the first two agents for the conversation
+	var agent1, agent2 *agent.Agent
+	for _, a := range agents {
+		if agent1 == nil {
+			agent1 = a
+		} else if agent2 == nil {
+			agent2 = a
+			break
+		}
+	}
+
 	server := &Server{
 		router:            router,
 		agents:            agents,
@@ -147,6 +163,15 @@ func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey str
 		clientsMux:   sync.RWMutex{},
 		playerQueue:  make(map[string]int),
 		nextQueueNum: 1,
+		// Initialize shared conversation
+		sharedConversation: conversation.NewConversation(
+			agent1,
+			agent2,
+			conversation.DefaultConfig(),
+			inputHandler,
+			apiKey,
+		),
+		conversationStarted: false,
 	}
 
 	router.GET("/ws/conversation", server.handleConversationWebSocket)
@@ -250,34 +275,37 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 	}
 	defer ws.Close()
 
-	// Set user as connected
-	s.connectedMutex.Lock()
-	s.isUserConnected = true
-	s.connectedMutex.Unlock()
-
-	// Create a new stop channel for this connection
-	stopChan := make(chan struct{}) // Create local stop channel
-	s.stopDiscussion = stopChan     // Assign to server field
-
 	// Add client to the clients map
 	s.clientsMux.Lock()
 	s.clients[ws] = "" // Initially empty player ID
 	s.clientsMux.Unlock()
 
+	// Set user as connected and start conversation if not already started
+	s.connectedMutex.Lock()
+	s.isUserConnected = true
+	if !s.conversationStarted {
+		s.conversationStarted = true
+		// Create a new stop channel for the first connection
+		s.stopDiscussion = make(chan struct{})
+		// Start continuous discussion in a separate goroutine
+		go s.continueAgentDiscussion(ws)
+	}
+	s.connectedMutex.Unlock()
+
 	// Ensure cleanup on disconnect
 	defer func() {
-		s.connectedMutex.Lock()
-		s.isUserConnected = false
-		s.connectedMutex.Unlock()
-
-		// Remove client from the clients map
 		s.clientsMux.Lock()
 		delete(s.clients, ws)
+		remaining := len(s.clients)
 		s.clientsMux.Unlock()
 
-		// Only close if it matches our local channel
-		if s.stopDiscussion == stopChan {
-			close(stopChan)
+		// Only stop conversation if this was the last client
+		if remaining == 0 {
+			s.connectedMutex.Lock()
+			s.isUserConnected = false
+			s.conversationStarted = false
+			close(s.stopDiscussion)
+			s.connectedMutex.Unlock()
 		}
 	}()
 
@@ -305,9 +333,6 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 			}
 		}
 	}()
-
-	// Start continuous discussion in a separate goroutine
-	go s.continueAgentDiscussion(ws)
 
 	// Handle incoming messages
 	for {
@@ -660,15 +685,12 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 			// Add response to conversation log
 			s.addToConversationLog(agent.GetName(), response, false, "Bear vs Tiger: Who is the superior predator?")
 
-			// Send text response
-			if err := ws.WriteJSON(gin.H{
+			// Broadcast text response to all clients
+			s.broadcastMessage(gin.H{
 				"type":    "text",
 				"message": response,
 				"agent":   agent.GetName(),
-			}); err != nil {
-				log.Printf("Failed to send text response: %v", err)
-				return
-			}
+			})
 
 			// Time the audio generation
 			audioStart := time.Now()
@@ -690,15 +712,13 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 			}
 			s.cacheMutex.Unlock()
 
-			if err := ws.WriteJSON(gin.H{
+			// Broadcast audio URL to all clients
+			s.broadcastMessage(gin.H{
 				"type":     "audio",
 				"audioUrl": fmt.Sprintf("/api/audio/%s", audioID),
 				"agent":    agent.GetName(),
 				"duration": audioDuration.Seconds(),
-			}); err != nil {
-				log.Printf("Failed to send audio URL: %v", err)
-				return
-			}
+			})
 
 			// Calculate total generation time for this message
 			totalGenerationTime := time.Since(generationStart)
