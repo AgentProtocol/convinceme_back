@@ -42,7 +42,7 @@ func (s *Scorer) ScoreArgument(ctx context.Context, argument, topic string) (*Ar
 
 "%s"
 
-Score each aspect from 0-100 and explain why:
+Score each aspect from 0-10 and explain why:
 - Strength: How well it supports their position
 - Relevance: How relevant to the discussion
 - Logic: Quality of reasoning and structure
@@ -52,11 +52,11 @@ Score each aspect from 0-100 and explain why:
 
 
 Your response MUST ONLY be a valid JSON object with the following structure. Dont write the word json, just output a correct json-formatted object, starting with a { symbol
-    "strength": <0-100>,
-    "relevance": <0-100>,
-    "logic": <0-100>,
-    "truth": <0-100>,
-    "humor": <0-100>,
+    "strength": <0-10>,
+    "relevance": <0-10>,
+    "logic": <0-10>,
+    "truth": <0-10>,
+    "humor": <0-10>,
     "Explanation": "<brief explanation of scores>"
 }`, topic, argument)
 

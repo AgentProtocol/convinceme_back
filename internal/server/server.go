@@ -88,7 +88,7 @@ var upgrader = websocket.Upgrader{
 const (
 	TIGER_AGENT = "Tony 'The Tiger King' Chen"
 	BEAR_AGENT  = "Mike 'Grizzly' Johnson"
-	MAX_SCORE   = 420
+	MAX_SCORE   = 200
 )
 
 var agent1Score int = MAX_SCORE / 2
@@ -589,31 +589,6 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 			// Time the response generation
 			responseStart := time.Now()
 			response, err := agent.GenerateResponse(ctx, "Bear vs Tiger: Who would win in a fight?", prompt)
-			// Score argumetns and add the score to the final gameScore
-			score, err := s.scorer.ScoreArgument(ctx, response, "Bear vs Tiger: Who would win in a fight?")
-
-			// log.Printf("\n-------------->agent1Name is %s, agent2Name is %s\n", agent1Name, agent2Name)
-
-			if (agent.GetName() == TIGER_AGENT) {
-				agent1Score = agent1Score + int(score.Average)
-				agent2Score = agent2Score - int(score.Average)
-			} else {
-				agent2Score = agent2Score + int(score.Average)
-				agent1Score = agent1Score - int(score.Average)
-			}
-
-			
-			
-			log.Printf("------------------>%s scored %d points <---------------", agent.GetName(), int(score.Average))
-	
-			ws.WriteJSON(gin.H{
-				"type": "game_score",
-				"gameScore": gin.H{
-					TIGER_AGENT: agent1Score,
-					BEAR_AGENT: agent2Score,
-				},
-			})
-			//
 			
 			responseGenerationTime := time.Since(responseStart)
 			if err != nil {
@@ -644,6 +619,39 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 			}
 
 			audioDuration := getAudioDuration(audioData)
+			go func() {
+				// Wait for the audio to finish
+				time.Sleep(audioDuration)
+				
+				// Now score the response
+				score, err := s.scorer.ScoreArgument(ctx, response, "Bear vs Tiger: Who would win in a fight?")
+				if err != nil {
+					log.Printf("Error scoring response: %v", err)
+					return
+				}
+				// Agents arguments are two times less impactful as compared to the player's
+				if (agent.GetName() == TIGER_AGENT) {
+					agent1Score = agent1Score + int(score.Average)/2
+					agent2Score = agent2Score - int(score.Average)/2
+				} else {
+					agent2Score = agent2Score + int(score.Average)/2
+					agent1Score = agent1Score - int(score.Average)/2
+				}
+				log.Printf("------------------>%s scored %d points <---------------", agent.GetName(), int(score.Average))
+		
+				ws.WriteJSON(gin.H{
+					"type": "game_score",
+					"gameScore": gin.H{
+						TIGER_AGENT: agent1Score,
+						BEAR_AGENT: agent2Score,
+					},
+				})
+				
+			
+				// Handle the score result here
+				log.Printf("Score calculated after audio delay: %v", score)
+			}()
+
 			audioID := fmt.Sprintf("%s_%d", agent.GetName(), time.Now().UnixNano())
 
 			s.cacheMutex.Lock()
