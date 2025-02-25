@@ -66,8 +66,11 @@ func (s *TTSService) getVoiceID(voice string) string {
 	return VoiceMarkID // Default to Mark if voice not found
 }
 
-// GenerateAudio converts text to speech using ElevenLabs API
+// GenerateAudio generates audio from text using ElevenLabs
 func (s *TTSService) GenerateAudio(ctx context.Context, text string) ([]byte, error) {
+	// Preprocess text to fix pronunciation
+	text = s.preprocessTextForPronunciation(text)
+
 	url := fmt.Sprintf("https://api.elevenlabs.io/v1/text-to-speech/%s", s.getVoiceID(s.voice))
 
 	requestBody := ElevenLabsRequest{
@@ -111,4 +114,22 @@ func (s *TTSService) GenerateAudio(ctx context.Context, text string) ([]byte, er
 	}
 
 	return audioData, nil
+}
+
+// preprocessTextForPronunciation modifies text to ensure correct pronunciation
+func (s *TTSService) preprocessTextForPronunciation(text string) string {
+	// Fix "memecoins" pronunciation
+	// Replace with phonetic spelling or spacing that guides pronunciation
+	text = strings.ReplaceAll(text, "memecoins", "meemcoins")
+	text = strings.ReplaceAll(text, "Memecoins", "meemcoins")
+	text = strings.ReplaceAll(text, "MEMECOINS", "meemcoins")
+	
+	// Fix "$DOGE" pronunciation
+	text = strings.ReplaceAll(text, "$DOGE", "doje coin")
+	text = strings.ReplaceAll(text, "$doge", "doje coin")
+	text = strings.ReplaceAll(text, "DOGE", "doje")
+	text = strings.ReplaceAll(text, "Doge", "doje")
+	text = strings.ReplaceAll(text, "doge", "doje")
+	
+	return text
 }
