@@ -1,0 +1,10 @@
+localhost {
+	encode zstd gzip
+	handle_path /static/* {
+		root * /usr/share/caddy/static
+		file_server
+	}
+	handle {
+		reverse_proxy backend:8080
+	}
+}

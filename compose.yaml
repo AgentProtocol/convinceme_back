@@ -1,0 +1,31 @@
+name: convinceme
+
+configs:
+  caddyfile:
+    file: "./Caddyfile"
+
+networks:
+  internalNet:
+    driver: bridge
+
+services:
+  backend:
+    build: .
+    networks:
+      - internalNet
+    ports:
+      - "0.0.0.0:8080:8080"
+    restart: unless-stopped
+
+  server:
+    image: caddy:2.8.4-alpine
+    configs:
+      - source: caddyfile
+        target: /etc/caddy/Caddyfile
+    volumes:
+    - "${PWD}/static:/usr/share/caddy/static:ro"
+    networks:
+      - internalNet
+    ports:
+      - "0.0.0.0:4243:443"
+    restart: unless-stopped
