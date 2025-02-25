@@ -861,7 +861,7 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn, conversationID int)
 				}
 				log.Printf("------------------>%s scored %d points <---------------", agent.GetName(), int(score.Average))
 		
-				ws.WriteJSON(gin.H{
+				s.broadcastMessage(gin.H{
 					"type": "game_score",
 					"gameScore": gin.H{
 						TIGER_AGENT: agent1Score,
