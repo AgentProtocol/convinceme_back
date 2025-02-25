@@ -17,16 +17,16 @@ import (
 
 // AgentConfig holds configuration for an agent
 type AgentConfig struct {
-	Name            string
-	Role            string
-	SystemPrompt    string
-	DebatePosition  string
-	ExpertiseArea   string
-	KeyArguments    []string
-	Voice           types.Voice
-	Temperature     float32
+	Name                string
+	Role                string
+	SystemPrompt        string
+	DebatePosition      string
+	ExpertiseArea       string
+	KeyArguments        []string
+	Voice               types.Voice
+	Temperature         float32
 	MaxCompletionTokens int
-	TopP            float32
+	TopP                float32
 }
 
 // MemoryEntry represents a single memory entry with context
@@ -50,7 +50,7 @@ type Agent struct {
 }
 
 // NewAgent creates a new AI agent with the specified configuration
-func NewAgent(openAIKey string, elevenLabsKey string, config AgentConfig) (*Agent, error) {
+func NewAgent(openAIKey string, config AgentConfig) (*Agent, error) {
 	if !config.Voice.IsValid() {
 		config.Voice = types.VoiceMark // fallback to alloy if invalid
 	}
@@ -67,8 +67,8 @@ func NewAgent(openAIKey string, elevenLabsKey string, config AgentConfig) (*Agen
 		return nil, fmt.Errorf("failed to create LLM: %v", err)
 	}
 
-	// Use ElevenLabs key for TTS
-	tts, err := audio.NewTTSService(elevenLabsKey, config.Voice.String())
+	// Create TTS service - API keys are loaded from environment variables
+	tts, err := audio.NewTTSService(config.Voice.String())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create TTS service: %v", err)
 	}
@@ -210,10 +210,10 @@ func LoadAgentConfig(configPath string) (AgentConfig, error) {
 
 // Add a new method to check if a message is directed to this agent
 func (a *Agent) IsAddressed(message string) bool {
-    // Check for common name variations
-    nameLower := strings.ToLower(a.config.Name)
-    messageLower := strings.ToLower(message)
-    
-    return strings.Contains(messageLower, nameLower) ||
-           strings.Contains(messageLower, strings.ToLower(strings.Split(a.config.Name, " ")[0])) // First name check
+	// Check for common name variations
+	nameLower := strings.ToLower(a.config.Name)
+	messageLower := strings.ToLower(message)
+
+	return strings.Contains(messageLower, nameLower) ||
+		strings.Contains(messageLower, strings.ToLower(strings.Split(a.config.Name, " ")[0])) // First name check
 }
