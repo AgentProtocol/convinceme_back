@@ -517,16 +517,14 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 
 				log.Printf("Sending argument data through WebSocket: %+v", argument)
 
-				if err := ws.WriteJSON(gin.H{
+				s.broadcastMessage(gin.H{
 					"type":     "argument",
 					"argument": argument,
-				}); err != nil {
-					log.Printf("Failed to send argument to user: %v", err)
-				}
+				})
 			}
 
 			// Send score back to user
-			if err := ws.WriteJSON(gin.H{
+			s.broadcastMessage(gin.H{
 				"type": "score",
 				"message": fmt.Sprintf("Argument score:\n"+
 					"Strength: %d/100\n"+
@@ -543,9 +541,7 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 					score.Humor,
 					score.Average,
 					score.Explanation),
-			}); err != nil {
-				log.Printf("Failed to send score to user: %v", err)
-			}
+			})
 			log.Printf("Raw Jason values in server.go are:\n")
 
 			log.Printf("Argument score:\n"+
@@ -574,7 +570,7 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 		}
 		log.Printf("%s scored %d points ", msg.Side, int(score.Average))
 
-		ws.WriteJSON(gin.H{
+		s.broadcastMessage(gin.H{
 			"type": "game_score",
 			"gameScore": gin.H{
 				agent1Name: agent1Score,
