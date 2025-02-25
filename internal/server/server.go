@@ -95,7 +95,7 @@ var upgrader = websocket.Upgrader{
 
 // Define constants for agent roles
 const (
-	TIGER_AGENT = "'Fundamentals First' Florentin"
+	TIGER_AGENT = "'Fundamentals First' Bradford"
 	BEAR_AGENT  = "'Memecoin Supercycle' Murad"
 	MAX_SCORE   = 420
 )
@@ -835,6 +835,8 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn, conversationID int)
 			audioGenerationTime := time.Since(audioStart)
 			if err != nil {
 				log.Printf("Failed to generate audio server: %v", err)
+				s.lastAudioStart = time.Now()
+				s.requiredDelay = 5 * time.Second
 				continue
 			}
 
