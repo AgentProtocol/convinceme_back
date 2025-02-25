@@ -5,6 +5,11 @@ DB_PATH := data/arguments.db
 SCHEMA_PATH := sql/schema.sql
 QUERY_PATH := sql/queries.sql
 
+# DeployMe
+.PHONY: deploy
+deploy:
+	docker compose up --build
+
 # Directory structure
 .PHONY: dirs
 dirs:
