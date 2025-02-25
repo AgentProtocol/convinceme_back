@@ -557,7 +557,7 @@
                             const message = {
                                 type: 'text',
                                 message: data.text,
-                                topic: 'Bear vs Tiger: Who is the superior predator?'
+                                topic: 'Are memecoins net negative or positive for the crypto space?'
                             };
                             ws.send(JSON.stringify(message));
                             addMessage(data.text, true);
@@ -591,8 +591,8 @@
             if (ws && ws.readyState === WebSocket.OPEN) {
                 const data = {
                     message: message,
-                    topic: 'Bear vs Tiger: Who is the superior predator?',
-                    player_id: playerId
+                    topic: 'Are memecoins net negative or positive for the crypto space?',
+                    player_id: 'player1'
                 };
 
                 ws.send(JSON.stringify(data));

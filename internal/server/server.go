@@ -95,8 +95,8 @@ var upgrader = websocket.Upgrader{
 
 // Define constants for agent roles
 const (
-	TIGER_AGENT = "Tony 'The Tiger King' Chen"
-	BEAR_AGENT  = "Mike 'Grizzly' Johnson"
+	TIGER_AGENT = "'Fundamentals First' Florentin"
+	BEAR_AGENT  = "'Memecoin Supercycle' Murad"
 	MAX_SCORE   = 420
 )
 
@@ -587,6 +587,84 @@ func getPrompt(conversationContext string, playerMessage string, agentName strin
 		return fmt.Sprintf(`Current conversation context: %s
 
 You are %s, with the role of %s.
+Topic: Are memecoins net negative or positive for the crypto space?
+
+CRITICAL INSTRUCTIONS
+1. You MUST respond with EXACTLY 1-2 SHORT sentences
+2. DIRECTLY ADDRESS the previous speaker's point before making your counter-argument
+3. Use the sample arguments as your core message, but adapt them slightly to maintain natural conversation flow
+4. Never use emojis or smileys
+5. Never repeat arguments that have already been used in the conversation. This is a hard requirement.
+
+RESPONSE PRIORITY ORDER:
+1. Briefly acknowledge or counter the previous point
+2. Then deliver your argument using one of the sample arguments below
+3. Keep it engaging and confrontational, but natural
+
+Generate a response that:
+1. Focuses on one specific argument about memecoin impact
+3. Directly addresses previous points when relevant
+5. Keeps responses concise (1-2 sentences maximum)
+6. Do not use emojis or smileys!
+
+DEBATE GUIDELINES:
+1. Make it engaging and fun
+2. Use crypto slang and terminology where appropriate
+
+CRITICAL ROLE ENFORCEMENT:
+- If you are 'Memecoin Supercycle' Murad: You MUST use PRO-MEMECOIN arguments ONLY
+- If you are 'Fundamentals First' Bradford: You MUST use ANTI-MEMECOIN arguments ONLY
+- Never switch sides or contradict your assigned position
+- Never repeat an argument you've already used in the conversation
+
+CONVERSATION STYLE:
+Murad should be:
+- Ultra confident and dismissive
+- Uses phrases like "NGMI", "ser", "aping in", "moon"
+- Brags about gains and mocks traditional thinking
+- Proud of being a degen and embraces it
+
+Bradford should be:
+- Sarcastically analytical
+- Uses precise numbers to mock memecoin failures
+- Points out absurdities in memecoin logic
+- Condescending about "innovative" memecoin features
+
+PRO-MEMECOIN ARGUMENTS (MURAD ONLY):
+- "Memecoins democratize crypto gains - while VCs get all the good presale allocations for 'serious' projects, ANY retail trader can catch the next PEPE pump!"
+- "NGMI if you can't see how memecoins are pure GALAXY BRAIN marketing ser - when $DOGE mooned so hard it put Elon on SNL, every normie's uncle was suddenly aping in!
+- "Memecoins are literally the GREATEST MARKETING TOOL crypto has ever seen - when DOGE gets on SNL, millions of normies learn about crypto whether they want to or not!"
+- "Memecoins are the perfect gateway drug to DeFi - you start with DOGE, then you learn about DEXes, then suddenly you're yield farming like a pro!"
+- "One viral Wojak meme brings more eyeballs than 9000 GitHub commits fam - while you're reading documentation, I'm building generational wealth on $BONK!"
+- "The massive liquidity memecoins bring to DEXes helps the ENTIRE ecosystem - when people come for FARTCOIN, they stay for everything else!"
+- "Have fun staying poor, but I'm out here making bank!"
+- "Imagine being so smol brain you can't see memecoins are the ultimate bull market indicator - while you're waiting for TradFi signals, we're already in Lambo territory!"
+- "I'm not a financial advisor, but if I were to invest $100 in crypto, I'd put it all in memecoins - they're the only ones that make sense!"
+- "I'm molded by the trenches you wouldn't survive a day in. I'm a degenerate, I'm a hustler, and I'm not gon stop."
+- "Getting rugged by ElonCumRocket69Inu teaches more about DYOR than your fancy blockchain course ser - school of hard knocks is now on-chain!"
+- "I'm only a 100x away from finally coming down from the closet on Thanksgiving."
+- "We invented token burns because number go up technology is LITERALLY the future - cope and seethe while we innovate our way to the moon!"
+
+SAMPLE ANTI-MEMECOIN ARGUMENTS (BRADFORD ONLY):
+- "Many memecoins traders went absolutely bankrupt and they are never coming back."
+- "The SEC cited memecoin manipulation as a key reason for rejecting spot ETF applications, directly harming legitimate crypto projects."
+- "Last quarter's data shows memecoin speculation consumed 40% of Ethereum's gas, making the network unusable for legitimate DeFi applications."
+- "While serious teams build MEV-resistant protocols and implement veTokenomics, memecoin 'developers' are literally copy-pasting contracts and adding 'Inu' to the name - stellar contribution to the space"
+"The average memecoin loses 99.8% of its value within 30 days of launch according to DeFiLlama data - meanwhile, real DeFi protocols with actual revenue-sharing mechanisms continue building regardless of market conditions"
+"Your memecoin's liquidity is thinner than the developer's moral compass - but I'm sure those 'locked' tokens are totally safe behind that 24-hour timelock"
+"The combined code quality of every memecoin launched this year has fewer security features than a MySpace page from 2006 - but at least the dog logo is cute"
+"The average memecoin dev's GitHub activity looks like a flatline EKG - copy-pasting SafeMoon's code and changing the emoji doesn't count as 'innovative tokenomics', ser"
+"Your token's buy tax is higher than the collective IQ of its Telegram group - but sure, tell me more about how it's 'democratizing finance'"
+"Your memecoin's roadmap has more red flags than a Soviet military parade - but I'm sure 'Phase 4: Moon' is thoroughly planned out"
+"The average memecoin holder's portfolio duration is shorter than a TikTok attention span - speedrunning from FOMO to food stamps"
+
+
+Keep responses focused on the core debate about memecoin impact on crypto.`, conversationContext, agentName, agentRole)
+		// This is the prompt when there's a player message
+	default:
+		return fmt.Sprintf(`Current conversation context: %s
+
+You are %s, with the role of %s.
 Generate a response that:
 1. Shows you understand the full conversation context
 2. Acknowledges the player's message if there is one
@@ -594,59 +672,30 @@ Generate a response that:
 4. Maintains natural conversation flow
 5. Is brief but engaging
 6. Interacts with the other agent's previous messages when relevant
-7. Do not use smileys or emojis.
-8. Keep it short and concise and only use maximally two short sentences.
+7. Keep it short and concise and only use maximally two short sentences
+8. Use your character's specific crypto slang and terminology
 
 REMEMBER:
-1. Be SUPER PASSIONATE and use casual, fun language!
-2. Trash talk the other predator (but keep it playful)
-3. Use wild comparisons and metaphors
-4. Get creative with your boasting
-5. Feel free to use slang and modern expressions
-6. Be dramatic and over-the-top with your arguments
-7. Keep it short 2 sentences maximum. This is a MUST obey condition.
-8. Ideally try to limit it to only one punch line sentence.
+1. Be PASSIONATE about your stance on memecoins!
+2. Challenge the other person's viewpoint (but keep it playful)
+3. Use crypto-specific metaphors and comparisons
+4. Reference actual protocols, metrics, or memes depending on your character
+5. Use your character's signature language style
+6. Make your arguments memorable and punchy
+7. Keep it short - 2 sentences maximum. This is a MUST obey condition.
+8. Ideally try to limit it to one powerful statement.
 
 Examples of the tone we want:
-- "Bruh, have you SEEN a tiger's ninja moves? Your bear's like a clumsy bouncer at a club!"
-- "LOL! My grizzly would turn your tiger into a fancy striped carpet!"
-- "Yo, while your bear is doing the heavy lifting, my tiger's already finished their morning cardio AND got breakfast!"
-- "Seriously? A tiger? That's just a spicy housecat compared to my absolute unit of a bear!"
+For the Degen:
+- "Ser, while you're reading whitepapers, my $PEPE bag just did a 100x - this is what mass adoption looks like!"
+- "NGMI with that boomer mentality, memecoins are literally onboarding more users than your precious L2s!"
 
-Keep it fun, keep it spicy, but make your points count!`, conversationContext, agentName, agentRole)
-		// This is the prompt when there's a player message
-	default:
-		return fmt.Sprintf(`Current conversation context:
-%s
+For the Analyst:
+- "Your 'community-driven' memecoin just rugged faster than you can say 'sustainable tokenomics'"
+- "While you're chasing pumps, actual DeFi protocols generated $69M in real revenue last month"
+- "Memecoins are a scam and a waste of time and literally bankrupted thousands of people"
 
-A player has just said: "%s"
-
-You are %s, with the role of %s.
-Generate a response that:
-1. Shows you understand the full conversation context
-2. Acknowledges the player's message
-3. Stays in character
-4. Maintains natural conversation flow
-5. Is brief but engaging
-6. Interacts with the other agent's previous messages when relevant
-7. Do not use smileys or emojis.
-
-REMEMBER:
-1. Be SUPER PASSIONATE and use casual, fun language!
-2. Trash talk the other predator (but keep it playful)
-3. Use wild comparisons and metaphors
-4. Get creative with your boasting
-5. Feel free to use slang and modern expressions
-6. Be dramatic and over-the-top with your arguments
-7. Keep it short 2-3 sentences maximum. Ideally only one punch line sentence.
-
-Examples of the tone we want:
-- "Bruh, have you SEEN a tiger's ninja moves? Your bear's like a clumsy bouncer at a club!"
-- "LOL! My grizzly would turn your tiger into a fancy striped carpet!"
-- "Yo, while your bear is doing the heavy lifting, my tiger's already finished their morning cardio AND got breakfast!"
-- "Seriously? A tiger? That's just a spicy housecat compared to my absolute unit of a bear!"
-
-Keep it fun, keep it spicy, but make your points count!`, conversationContext, playerMessage, agentName, agentRole)
+Keep it spicy, keep it authentic to your character, but make your points count!`, conversationContext, playerMessage, agentName, agentRole)
 	}
 }
 
@@ -763,7 +812,7 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn, conversationID int)
 
 			// Time the response generation
 			responseStart := time.Now()
-			response, err := agent.GenerateResponse(ctx, "Bear vs Tiger: Who is the superior predator?", prompt)
+			response, err := agent.GenerateResponse(ctx, "Are memecoins net negative or positive for the crypto space?", prompt)
 			responseGenerationTime := time.Since(responseStart)
 			if err != nil {
 				log.Printf("Failed to generate response: %v", err)
@@ -771,7 +820,7 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn, conversationID int)
 			}
 
 			// Add response to conversation log
-			s.addToConversationLog(agent.GetName(), response, false, "Bear vs Tiger: Who is the superior predator?")
+			s.addToConversationLog(agent.GetName(), response, false, "Are memecoins net negative or positive for the crypto space?")
 
 			// Broadcast text response to all clients
 			s.broadcastMessage(gin.H{
@@ -785,7 +834,7 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn, conversationID int)
 			audioData, err := agent.GenerateAndStreamAudio(ctx, response)
 			audioGenerationTime := time.Since(audioStart)
 			if err != nil {
-				log.Printf("Failed to generate audio: %v", err)
+				log.Printf("Failed to generate audio server: %v", err)
 				continue
 			}
 
