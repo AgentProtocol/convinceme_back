@@ -367,7 +367,7 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 	// Score the user's message first
 	if s.scorer != nil {
 		log.Printf("\n=== Scoring User Message ===\n")
-		score, agent1Name, agent2Name, err := s.scorer.ScoreArgument(ctx, msg.Message, msg.Topic, agent1Name, agent2Name)
+		score, err := s.scorer.ScoreArgument(ctx, msg.Message, msg.Topic)
 		if err != nil {
 			log.Printf("Failed to score user message: %v", err)
 		} else {
@@ -588,7 +588,33 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 
 			// Time the response generation
 			responseStart := time.Now()
-			response, err := agent.GenerateResponse(ctx, "Bear vs Tiger: Who is the superior predator?", prompt)
+			response, err := agent.GenerateResponse(ctx, "Bear vs Tiger: Who would win in a fight?", prompt)
+			// Score argumetns and add the score to the final gameScore
+			score, err := s.scorer.ScoreArgument(ctx, response, "Bear vs Tiger: Who would win in a fight?")
+
+			// log.Printf("\n-------------->agent1Name is %s, agent2Name is %s\n", agent1Name, agent2Name)
+
+			if (agent.GetName() == TIGER_AGENT) {
+				agent1Score = agent1Score + int(score.Average)
+				agent2Score = agent2Score - int(score.Average)
+			} else {
+				agent2Score = agent2Score + int(score.Average)
+				agent1Score = agent1Score - int(score.Average)
+			}
+
+			
+			
+			log.Printf("------------------>%s scored %d points <---------------", agent.GetName(), int(score.Average))
+	
+			ws.WriteJSON(gin.H{
+				"type": "game_score",
+				"gameScore": gin.H{
+					TIGER_AGENT: agent1Score,
+					BEAR_AGENT: agent2Score,
+				},
+			})
+			//
+			
 			responseGenerationTime := time.Since(responseStart)
 			if err != nil {
 				log.Printf("Failed to generate response: %v", err)
@@ -596,7 +622,7 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 			}
 
 			// Add response to conversation log
-			s.addToConversationLog(agent.GetName(), response, false, "Bear vs Tiger: Who is the superior predator?")
+			s.addToConversationLog(agent.GetName(), response, false, "Bear vs Tiger: Who would win in a fight?")
 
 			// Send text response
 			if err := ws.WriteJSON(gin.H{
