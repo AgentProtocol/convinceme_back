@@ -53,6 +53,13 @@ type Server struct {
 	// Field to track pending user message
 	pendingUserMessage     string
 	pendingUserMessageLock sync.RWMutex
+	// New fields for managing multiple clients
+	clients    map[*websocket.Conn]string // Map of WebSocket connections to player IDs
+	clientsMux sync.RWMutex
+	// Track player queue numbers
+	playerQueue    map[string]int // Map of player IDs to their queue numbers
+	playerQueueMux sync.RWMutex
+	nextQueueNum   int // Next available queue number
 }
 
 type ConversationEntry struct {
@@ -95,7 +102,7 @@ var agent1Score int = MAX_SCORE / 2
 var agent2Score int = MAX_SCORE / 2
 
 func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey string, useHTTPS bool, config *Config) *Server {
-
+	// Initialize player queue tracking
 	scorer, err := scoring.NewScorer(apiKey)
 	if err != nil {
 		log.Printf("Warning: Failed to initialize scorer: %v", err)
@@ -135,6 +142,11 @@ func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey str
 		stopDiscussion: make(chan struct{}),
 		lastAudioStart: time.Now(),
 		requiredDelay:  0,
+		// Initialize clients map and player queue tracking
+		clients:      make(map[*websocket.Conn]string),
+		clientsMux:   sync.RWMutex{},
+		playerQueue:  make(map[string]int),
+		nextQueueNum: 1,
 	}
 
 	router.GET("/ws/conversation", server.handleConversationWebSocket)
@@ -247,11 +259,21 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 	stopChan := make(chan struct{}) // Create local stop channel
 	s.stopDiscussion = stopChan     // Assign to server field
 
+	// Add client to the clients map
+	s.clientsMux.Lock()
+	s.clients[ws] = "" // Initially empty player ID
+	s.clientsMux.Unlock()
+
 	// Ensure cleanup on disconnect
 	defer func() {
 		s.connectedMutex.Lock()
 		s.isUserConnected = false
 		s.connectedMutex.Unlock()
+
+		// Remove client from the clients map
+		s.clientsMux.Lock()
+		delete(s.clients, ws)
+		s.clientsMux.Unlock()
 
 		// Only close if it matches our local channel
 		if s.stopDiscussion == stopChan {
@@ -301,6 +323,21 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 		// Reset read deadline after each successful message
 		ws.SetReadDeadline(time.Now().Add(time.Second * 60))
 
+		// Update player ID in clients map and assign queue number if not set
+		if msg.PlayerID != "" {
+			s.clientsMux.Lock()
+			s.clients[ws] = msg.PlayerID
+			s.clientsMux.Unlock()
+
+			// Assign queue number if not already assigned
+			s.playerQueueMux.Lock()
+			if _, exists := s.playerQueue[msg.PlayerID]; !exists {
+				s.playerQueue[msg.PlayerID] = s.nextQueueNum
+				s.nextQueueNum++
+			}
+			s.playerQueueMux.Unlock()
+		}
+
 		// Handle ping messages
 		if msg.Type == "ping" {
 			if err := ws.WriteJSON(gin.H{"type": "pong"}); err != nil {
@@ -319,9 +356,34 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 		s.pendingUserMessage = msg.Message
 		s.pendingUserMessageLock.Unlock()
 
+		// Broadcast message to all connected clients with queue number
+		s.playerQueueMux.Lock()
+		queueNum := s.playerQueue[msg.PlayerID]
+		s.playerQueueMux.Unlock()
+
+		s.broadcastMessage(gin.H{
+			"type": "message",
+			"content": msg.Message,
+			"agent": msg.PlayerID,
+			"queueNumber": queueNum,
+		})
+
 		s.handlePlayerMessage(ws, msg)
 
 		log.Printf("User message received: %s", msg.Message)
+	}
+}
+
+// Add a new method to broadcast messages to all connected clients
+func (s *Server) broadcastMessage(message interface{}) {
+	s.clientsMux.RLock()
+	defer s.clientsMux.RUnlock()
+
+	// Iterate through all connected clients and send the message
+	for client := range s.clients {
+		if err := client.WriteJSON(message); err != nil {
+			log.Printf("Error broadcasting message: %v", err)
+		}
 	}
 }
 

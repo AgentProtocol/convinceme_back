@@ -268,7 +268,12 @@
 
             const messageContent = document.createElement('div');
             messageContent.className = 'message-content';
-            messageContent.textContent = message;
+            // Add player queue number prefix if available
+            if (isUser && data.queueNumber) {
+                messageContent.textContent = `Player ${data.queueNumber} message: ${message}`;
+            } else {
+                messageContent.textContent = message;
+            }
             messageDiv.appendChild(messageContent);
 
             // Add score and role display for user messages
