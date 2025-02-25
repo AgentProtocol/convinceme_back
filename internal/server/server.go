@@ -10,13 +10,12 @@ import (
 	"log"
 	"net/http"
 	"strconv"
-
-	//"sort"
-	//"strings"
 	"sync"
 	"time"
 
 	"github.com/neo/convinceme_backend/internal/audio"
+	"github.com/neo/convinceme_backend/internal/conversation"
+	"github.com/neo/convinceme_backend/internal/player"
 	"github.com/quic-go/quic-go/http3"
 	"github.com/tcolgate/mp3"
 
@@ -43,16 +42,26 @@ type Server struct {
 	config             *Config
 	scorer             *scoring.Scorer
 	db                 *database.Database
-	// New fields for continuous discussion
-	isUserConnected bool
-	connectedMutex  sync.RWMutex
-	userMessages    chan string
-	stopDiscussion  chan struct{}
-	lastAudioStart  time.Time
-	requiredDelay   time.Duration
-	// Field to track pending user message
+	// Connection-related fields with single mutex
+	connectionMutex     sync.RWMutex
+	clients             map[*websocket.Conn]string // Map of WebSocket connections to player IDs
+	conversationStarted bool
+	stopDiscussion      chan struct{}
+	// Add new fields for tracking conversation state
+	conversationID int
+	conversationWg sync.WaitGroup
+	// Add a dedicated lock for conversation state transitions
+	conversationStateMutex sync.Mutex
+	// Other fields
+	userMessages           chan string
+	lastAudioStart         time.Time
+	requiredDelay          time.Duration
 	pendingUserMessage     string
 	pendingUserMessageLock sync.RWMutex
+	playerQueue            map[string]int // Map of player IDs to their queue numbers
+	playerQueueMux         sync.RWMutex
+	nextQueueNum           int // Next available queue number
+	sharedConversation     *conversation.Conversation
 }
 
 type ConversationEntry struct {
@@ -86,16 +95,16 @@ var upgrader = websocket.Upgrader{
 
 // Define constants for agent roles
 const (
-	TIGER_AGENT = "Tony 'The Tiger King' Chen"
-	BEAR_AGENT  = "Mike 'Grizzly' Johnson"
-	MAX_SCORE   = 420
+	TIGER_AGENT = "'Fundamentals First' Bradford"
+	BEAR_AGENT  = "'Memecoin Supercycle' Murad"
+	MAX_SCORE   = 200
 )
 
 var agent1Score int = MAX_SCORE / 2
 var agent2Score int = MAX_SCORE / 2
 
 func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey string, useHTTPS bool, config *Config) *Server {
-
+	// Initialize player queue tracking
 	scorer, err := scoring.NewScorer(apiKey)
 	if err != nil {
 		log.Printf("Warning: Failed to initialize scorer: %v", err)
@@ -120,6 +129,20 @@ func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey str
 		c.Next()
 	})
 
+	// Create input handler for the shared conversation
+	inputHandler := player.NewInputHandler(log.Default())
+
+	// Get the first two agents for the conversation
+	var agent1, agent2 *agent.Agent
+	for _, a := range agents {
+		if agent1 == nil {
+			agent1 = a
+		} else if agent2 == nil {
+			agent2 = a
+			break
+		}
+	}
+
 	server := &Server{
 		router:            router,
 		agents:            agents,
@@ -135,6 +158,23 @@ func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey str
 		stopDiscussion: make(chan struct{}),
 		lastAudioStart: time.Now(),
 		requiredDelay:  0,
+		// Initialize clients map and player queue tracking
+		clients:      make(map[*websocket.Conn]string),
+		playerQueue:  make(map[string]int),
+		nextQueueNum: 1,
+		// Initialize shared conversation
+		sharedConversation: conversation.NewConversation(
+			agent1,
+			agent2,
+			conversation.DefaultConfig(),
+			inputHandler,
+			apiKey,
+		),
+		conversationStarted: false,
+		// Initialize conversation tracking fields
+		conversationID:         0,
+		conversationWg:         sync.WaitGroup{},
+		conversationStateMutex: sync.Mutex{},
 	}
 
 	router.GET("/ws/conversation", server.handleConversationWebSocket)
@@ -158,6 +198,7 @@ func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey str
 		}
 	})
 
+	log.Printf("Server initialized with %d agents", len(agents))
 	return server
 }
 
@@ -238,24 +279,66 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 	}
 	defer ws.Close()
 
-	// Set user as connected
-	s.connectedMutex.Lock()
-	s.isUserConnected = true
-	s.connectedMutex.Unlock()
+	// Lock the conversation state to check if we can start a new one
+	s.conversationStateMutex.Lock()
 
-	// Create a new stop channel for this connection
-	stopChan := make(chan struct{}) // Create local stop channel
-	s.stopDiscussion = stopChan     // Assign to server field
+	// Add client to map first (always do this)
+	s.connectionMutex.Lock()
+	s.clients[ws] = "" // Initially empty player ID
+	s.connectionMutex.Unlock()
+
+	// Check if conversation needs to be started
+	var startConversation bool
+	var currentConversationID int
+
+	if !s.conversationStarted {
+		s.conversationStarted = true
+		startConversation = true
+		// Increment conversation ID to ensure unique identification
+		s.conversationID++
+		currentConversationID = s.conversationID
+		// Create a new stop channel
+		s.stopDiscussion = make(chan struct{})
+		log.Printf("Starting new conversation with ID: %d", currentConversationID)
+	} else {
+		currentConversationID = s.conversationID
+		log.Printf("Client joined existing conversation with ID: %d", currentConversationID)
+	}
+
+	// Start conversation outside the locks if needed
+	if startConversation {
+		s.conversationWg.Add(1)
+		go func() {
+			defer s.conversationWg.Done()
+			s.continueAgentDiscussion(ws, currentConversationID)
+		}()
+	}
+
+	// Release the state lock now that we've decided what to do
+	s.conversationStateMutex.Unlock()
 
 	// Ensure cleanup on disconnect
 	defer func() {
-		s.connectedMutex.Lock()
-		s.isUserConnected = false
-		s.connectedMutex.Unlock()
+		// Lock to prevent race conditions during cleanup
+		s.conversationStateMutex.Lock()
+		defer s.conversationStateMutex.Unlock()
 
-		// Only close if it matches our local channel
-		if s.stopDiscussion == stopChan {
-			close(stopChan)
+		s.connectionMutex.Lock()
+		delete(s.clients, ws)
+		remaining := len(s.clients)
+		s.connectionMutex.Unlock()
+
+		// Only stop conversation if this was the last client
+		if remaining == 0 && s.conversationStarted {
+			log.Printf("Last client disconnected. Stopping conversation ID: %d", s.conversationID)
+			s.conversationStarted = false
+			close(s.stopDiscussion)
+
+			// Wait for conversation goroutine to fully terminate
+			// This happens while holding the state lock to prevent new conversations from starting
+			log.Printf("Waiting for conversation ID %d to terminate...", s.conversationID)
+			s.conversationWg.Wait()
+			log.Printf("Conversation ID %d fully terminated", s.conversationID)
 		}
 	}()
 
@@ -284,9 +367,6 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 		}
 	}()
 
-	// Start continuous discussion in a separate goroutine
-	go s.continueAgentDiscussion(ws)
-
 	// Handle incoming messages
 	for {
 		var msg ConversationMessage
@@ -300,6 +380,21 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 
 		// Reset read deadline after each successful message
 		ws.SetReadDeadline(time.Now().Add(time.Second * 60))
+
+		// Update player ID in clients map and assign queue number if not set
+		if msg.PlayerID != "" {
+			s.connectionMutex.Lock()
+			s.clients[ws] = msg.PlayerID
+			s.connectionMutex.Unlock()
+
+			// Assign queue number if not already assigned
+			s.playerQueueMux.Lock()
+			if _, exists := s.playerQueue[msg.PlayerID]; !exists {
+				s.playerQueue[msg.PlayerID] = s.nextQueueNum
+				s.nextQueueNum++
+			}
+			s.playerQueueMux.Unlock()
+		}
 
 		// Handle ping messages
 		if msg.Type == "ping" {
@@ -319,9 +414,34 @@ func (s *Server) handleConversationWebSocket(c *gin.Context) {
 		s.pendingUserMessage = msg.Message
 		s.pendingUserMessageLock.Unlock()
 
+		// Broadcast message to all connected clients with queue number
+		s.playerQueueMux.Lock()
+		queueNum := s.playerQueue[msg.PlayerID]
+		s.playerQueueMux.Unlock()
+
+		s.broadcastMessage(gin.H{
+			"type":        "message",
+			"content":     msg.Message,
+			"agent":       msg.PlayerID,
+			"queueNumber": queueNum,
+		})
+
 		s.handlePlayerMessage(ws, msg)
 
 		log.Printf("User message received: %s", msg.Message)
+	}
+}
+
+// Add a new method to broadcast messages to all connected clients
+func (s *Server) broadcastMessage(message interface{}) {
+	s.connectionMutex.RLock()
+	defer s.connectionMutex.RUnlock()
+
+	// Iterate through all connected clients and send the message
+	for client := range s.clients {
+		if err := client.WriteJSON(message); err != nil {
+			log.Printf("Error broadcasting message: %v", err)
+		}
 	}
 }
 
@@ -367,7 +487,7 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 	// Score the user's message first
 	if s.scorer != nil {
 		log.Printf("\n=== Scoring User Message ===\n")
-		score, agent1Name, agent2Name, err := s.scorer.ScoreArgument(ctx, msg.Message, msg.Topic, agent1Name, agent2Name)
+		score, err := s.scorer.ScoreArgument(ctx, msg.Message, msg.Topic)
 		if err != nil {
 			log.Printf("Failed to score user message: %v", err)
 		} else {
@@ -397,16 +517,14 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 
 				log.Printf("Sending argument data through WebSocket: %+v", argument)
 
-				if err := ws.WriteJSON(gin.H{
+				s.broadcastMessage(gin.H{
 					"type":     "argument",
 					"argument": argument,
-				}); err != nil {
-					log.Printf("Failed to send argument to user: %v", err)
-				}
+				})
 			}
 
 			// Send score back to user
-			if err := ws.WriteJSON(gin.H{
+			s.broadcastMessage(gin.H{
 				"type": "score",
 				"message": fmt.Sprintf("Argument score:\n"+
 					"Strength: %d/100\n"+
@@ -423,9 +541,7 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 					score.Humor,
 					score.Average,
 					score.Explanation),
-			}); err != nil {
-				log.Printf("Failed to send score to user: %v", err)
-			}
+			})
 			log.Printf("Raw Jason values in server.go are:\n")
 
 			log.Printf("Argument score:\n"+
@@ -454,7 +570,7 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 		}
 		log.Printf("%s scored %d points ", msg.Side, int(score.Average))
 
-		ws.WriteJSON(gin.H{
+		s.broadcastMessage(gin.H{
 			"type": "game_score",
 			"gameScore": gin.H{
 				agent1Name: agent1Score,
@@ -471,6 +587,84 @@ func getPrompt(conversationContext string, playerMessage string, agentName strin
 		return fmt.Sprintf(`Current conversation context: %s
 
 You are %s, with the role of %s.
+Topic: Are memecoins net negative or positive for the crypto space?
+
+CRITICAL INSTRUCTIONS
+1. You MUST respond with EXACTLY 1-2 SHORT sentences
+2. DIRECTLY ADDRESS the previous speaker's point before making your counter-argument
+3. Use the sample arguments as your core message, but adapt them slightly to maintain natural conversation flow
+4. Never use emojis or smileys
+5. Never repeat arguments that have already been used in the conversation. This is a hard requirement.
+
+RESPONSE PRIORITY ORDER:
+1. Briefly acknowledge or counter the previous point
+2. Then deliver your argument using one of the sample arguments below
+3. Keep it engaging and confrontational, but natural
+
+Generate a response that:
+1. Focuses on one specific argument about memecoin impact
+3. Directly addresses previous points when relevant
+5. Keeps responses concise (1-2 sentences maximum)
+6. Do not use emojis or smileys!
+
+DEBATE GUIDELINES:
+1. Make it engaging and fun
+2. Use crypto slang and terminology where appropriate
+
+CRITICAL ROLE ENFORCEMENT:
+- If you are 'Memecoin Supercycle' Murad: You MUST use PRO-MEMECOIN arguments ONLY
+- If you are 'Fundamentals First' Bradford: You MUST use ANTI-MEMECOIN arguments ONLY
+- Never switch sides or contradict your assigned position
+- Never repeat an argument you've already used in the conversation
+
+CONVERSATION STYLE:
+Murad should be:
+- Ultra confident and dismissive
+- Uses phrases like "NGMI", "ser", "aping in", "moon"
+- Brags about gains and mocks traditional thinking
+- Proud of being a degen and embraces it
+
+Bradford should be:
+- Sarcastically analytical
+- Uses precise numbers to mock memecoin failures
+- Points out absurdities in memecoin logic
+- Condescending about "innovative" memecoin features
+
+PRO-MEMECOIN ARGUMENTS (MURAD ONLY):
+- "Memecoins democratize crypto gains - while VCs get all the good presale allocations for 'serious' projects, ANY retail trader can catch the next PEPE pump!"
+- "NGMI if you can't see how memecoins are pure GALAXY BRAIN marketing ser - when $DOGE mooned so hard it put Elon on SNL, every normie's uncle was suddenly aping in!
+- "Memecoins are literally the GREATEST MARKETING TOOL crypto has ever seen - when DOGE gets on SNL, millions of normies learn about crypto whether they want to or not!"
+- "Memecoins are the perfect gateway drug to DeFi - you start with DOGE, then you learn about DEXes, then suddenly you're yield farming like a pro!"
+- "One viral Wojak meme brings more eyeballs than 9000 GitHub commits fam - while you're reading documentation, I'm building generational wealth on $BONK!"
+- "The massive liquidity memecoins bring to DEXes helps the ENTIRE ecosystem - when people come for FARTCOIN, they stay for everything else!"
+- "Have fun staying poor, but I'm out here making bank!"
+- "Imagine being so smol brain you can't see memecoins are the ultimate bull market indicator - while you're waiting for TradFi signals, we're already in Lambo territory!"
+- "I'm not a financial advisor, but if I were to invest $100 in crypto, I'd put it all in memecoins - they're the only ones that make sense!"
+- "I'm molded by the trenches you wouldn't survive a day in. I'm a degenerate, I'm a hustler, and I'm not gon stop."
+- "Getting rugged by ElonCumRocket69Inu teaches more about DYOR than your fancy blockchain course ser - school of hard knocks is now on-chain!"
+- "I'm only a 100x away from finally coming down from the closet on Thanksgiving."
+- "We invented token burns because number go up technology is LITERALLY the future - cope and seethe while we innovate our way to the moon!"
+
+SAMPLE ANTI-MEMECOIN ARGUMENTS (BRADFORD ONLY):
+- "Many memecoins traders went absolutely bankrupt and they are never coming back."
+- "The SEC cited memecoin manipulation as a key reason for rejecting spot ETF applications, directly harming legitimate crypto projects."
+- "Last quarter's data shows memecoin speculation consumed 40% of Ethereum's gas, making the network unusable for legitimate DeFi applications."
+- "While serious teams build MEV-resistant protocols and implement veTokenomics, memecoin 'developers' are literally copy-pasting contracts and adding 'Inu' to the name - stellar contribution to the space"
+"The average memecoin loses 99.8% of its value within 30 days of launch according to DeFiLlama data - meanwhile, real DeFi protocols with actual revenue-sharing mechanisms continue building regardless of market conditions"
+"Your memecoin's liquidity is thinner than the developer's moral compass - but I'm sure those 'locked' tokens are totally safe behind that 24-hour timelock"
+"The combined code quality of every memecoin launched this year has fewer security features than a MySpace page from 2006 - but at least the dog logo is cute"
+"The average memecoin dev's GitHub activity looks like a flatline EKG - copy-pasting SafeMoon's code and changing the emoji doesn't count as 'innovative tokenomics', ser"
+"Your token's buy tax is higher than the collective IQ of its Telegram group - but sure, tell me more about how it's 'democratizing finance'"
+"Your memecoin's roadmap has more red flags than a Soviet military parade - but I'm sure 'Phase 4: Moon' is thoroughly planned out"
+"The average memecoin holder's portfolio duration is shorter than a TikTok attention span - speedrunning from FOMO to food stamps"
+
+
+Keep responses focused on the core debate about memecoin impact on crypto.`, conversationContext, agentName, agentRole)
+		// This is the prompt when there's a player message
+	default:
+		return fmt.Sprintf(`Current conversation context: %s
+
+You are %s, with the role of %s.
 Generate a response that:
 1. Shows you understand the full conversation context
 2. Acknowledges the player's message if there is one
@@ -478,87 +672,117 @@ Generate a response that:
 4. Maintains natural conversation flow
 5. Is brief but engaging
 6. Interacts with the other agent's previous messages when relevant
-7. Do not use smileys or emojis.
-8. Keep it short and concise and only use maximally two short sentences.
+7. Keep it short and concise and only use maximally two short sentences
+8. Use your character's specific crypto slang and terminology
 
 REMEMBER:
-1. Be SUPER PASSIONATE and use casual, fun language!
-2. Trash talk the other predator (but keep it playful)
-3. Use wild comparisons and metaphors
-4. Get creative with your boasting
-5. Feel free to use slang and modern expressions
-6. Be dramatic and over-the-top with your arguments
-7. Keep it short 2 sentences maximum. This is a MUST obey condition.
-8. Ideally try to limit it to only one punch line sentence.
+1. Be PASSIONATE about your stance on memecoins!
+2. Challenge the other person's viewpoint (but keep it playful)
+3. Use crypto-specific metaphors and comparisons
+4. Reference actual protocols, metrics, or memes depending on your character
+5. Use your character's signature language style
+6. Make your arguments memorable and punchy
+7. Keep it short - 2 sentences maximum. This is a MUST obey condition.
+8. Ideally try to limit it to one powerful statement.
 
 Examples of the tone we want:
-- "Bruh, have you SEEN a tiger's ninja moves? Your bear's like a clumsy bouncer at a club!"
-- "LOL! My grizzly would turn your tiger into a fancy striped carpet!"
-- "Yo, while your bear is doing the heavy lifting, my tiger's already finished their morning cardio AND got breakfast!"
-- "Seriously? A tiger? That's just a spicy housecat compared to my absolute unit of a bear!"
+For the Degen:
+- "Ser, while you're reading whitepapers, my $PEPE bag just did a 100x - this is what mass adoption looks like!"
+- "NGMI with that boomer mentality, memecoins are literally onboarding more users than your precious L2s!"
 
-Keep it fun, keep it spicy, but make your points count!`, conversationContext, agentName, agentRole)
-		// This is the prompt when there's a player message
-	default:
-		return fmt.Sprintf(`Current conversation context:
-%s
+For the Analyst:
+- "Your 'community-driven' memecoin just rugged faster than you can say 'sustainable tokenomics'"
+- "While you're chasing pumps, actual DeFi protocols generated $69M in real revenue last month"
+- "Memecoins are a scam and a waste of time and literally bankrupted thousands of people"
 
-A player has just said: "%s"
-
-You are %s, with the role of %s.
-Generate a response that:
-1. Shows you understand the full conversation context
-2. Acknowledges the player's message
-3. Stays in character
-4. Maintains natural conversation flow
-5. Is brief but engaging
-6. Interacts with the other agent's previous messages when relevant
-7. Do not use smileys or emojis.
-
-REMEMBER:
-1. Be SUPER PASSIONATE and use casual, fun language!
-2. Trash talk the other predator (but keep it playful)
-3. Use wild comparisons and metaphors
-4. Get creative with your boasting
-5. Feel free to use slang and modern expressions
-6. Be dramatic and over-the-top with your arguments
-7. Keep it short 2-3 sentences maximum. Ideally only one punch line sentence.
-
-Examples of the tone we want:
-- "Bruh, have you SEEN a tiger's ninja moves? Your bear's like a clumsy bouncer at a club!"
-- "LOL! My grizzly would turn your tiger into a fancy striped carpet!"
-- "Yo, while your bear is doing the heavy lifting, my tiger's already finished their morning cardio AND got breakfast!"
-- "Seriously? A tiger? That's just a spicy housecat compared to my absolute unit of a bear!"
-
-Keep it fun, keep it spicy, but make your points count!`, conversationContext, playerMessage, agentName, agentRole)
+Keep it spicy, keep it authentic to your character, but make your points count!`, conversationContext, playerMessage, agentName, agentRole)
 	}
 }
 
-func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
-	// Check if user is connected
-	s.connectedMutex.RLock()
-	isConnected := s.isUserConnected
-	s.connectedMutex.RUnlock()
+func (s *Server) continueAgentDiscussion(ws *websocket.Conn, conversationID int) {
+	log.Printf("Starting agent discussion for conversation ID: %d", conversationID)
 
-	if !isConnected {
+	// Check if conversation is still active
+	s.connectionMutex.RLock()
+	active := s.conversationStarted && conversationID == s.conversationID
+	hasClients := len(s.clients) > 0
+	s.connectionMutex.RUnlock()
+
+	if !active || !hasClients {
+		log.Printf("Conversation %d not active or no clients. Exiting.", conversationID)
 		return
 	}
 
+	log.Printf("Conversation %d is active with %d clients", conversationID, len(s.clients))
 	isfirstmessage := true
 
 	for {
+		// Recheck conversation status at the start of each loop
+		s.connectionMutex.RLock()
+		active := s.conversationStarted && conversationID == s.conversationID
+		hasClients := len(s.clients) > 0
+		clientCount := len(s.clients)
+		s.connectionMutex.RUnlock()
+
+		if !active || !hasClients {
+			log.Printf("Conversation %d no longer active or no clients (%d). Exiting loop.", conversationID, clientCount)
+			return
+		}
+
 		select {
 		case <-s.stopDiscussion:
+			log.Printf("Stop signal received for conversation %d", conversationID)
 			return
 		default:
+			// Check if conversation is still the current one
+			s.connectionMutex.RLock()
+			isCurrentConversation := conversationID == s.conversationID && s.conversationStarted
+			s.connectionMutex.RUnlock()
+
+			if !isCurrentConversation {
+				log.Printf("Conversation %d is no longer the current conversation (current is %d). Exiting.",
+					conversationID, s.conversationID)
+				return
+			}
+
 			// Check if enough time has passed since last audio
 			timeSinceLastAudio := time.Since(s.lastAudioStart)
 
 			if timeSinceLastAudio < s.requiredDelay {
 				isfirstmessage = false
 				waitTime := s.requiredDelay - timeSinceLastAudio
-				log.Printf("Waiting %v before next message", waitTime)
-				time.Sleep(waitTime)
+				log.Printf("Conversation %d: Waiting %v before next message", conversationID, waitTime)
+
+				// Instead of a single long sleep, break it into smaller sleeps
+				// and check if we should continue after each one
+				sleepIncrement := 500 * time.Millisecond
+				for timeLeft := waitTime; timeLeft > 0; timeLeft -= sleepIncrement {
+					sleepDuration := sleepIncrement
+					if timeLeft < sleepIncrement {
+						sleepDuration = timeLeft
+					}
+					time.Sleep(sleepDuration)
+
+					// Check if we should exit during sleep
+					select {
+					case <-s.stopDiscussion:
+						log.Printf("Stop signal received for conversation %d during wait", conversationID)
+						return
+					default:
+						// Continue waiting
+					}
+
+					// Check if conversation is still valid
+					s.connectionMutex.RLock()
+					stillValid := conversationID == s.conversationID && s.conversationStarted
+					stillHasClients := len(s.clients) > 0
+					s.connectionMutex.RUnlock()
+
+					if !stillValid || !stillHasClients {
+						log.Printf("Conversation %d is no longer valid during wait. Exiting.", conversationID)
+						return
+					}
+				}
 			} else {
 				isfirstmessage = true
 			}
@@ -588,7 +812,7 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 
 			// Time the response generation
 			responseStart := time.Now()
-			response, err := agent.GenerateResponse(ctx, "Bear vs Tiger: Who is the superior predator?", prompt)
+			response, err := agent.GenerateResponse(ctx, "Are memecoins net negative or positive for the crypto space?", prompt)
 			responseGenerationTime := time.Since(responseStart)
 			if err != nil {
 				log.Printf("Failed to generate response: %v", err)
@@ -596,28 +820,60 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 			}
 
 			// Add response to conversation log
-			s.addToConversationLog(agent.GetName(), response, false, "Bear vs Tiger: Who is the superior predator?")
+			s.addToConversationLog(agent.GetName(), response, false, "Are memecoins net negative or positive for the crypto space?")
 
-			// Send text response
-			if err := ws.WriteJSON(gin.H{
+			// Broadcast text response to all clients
+			s.broadcastMessage(gin.H{
 				"type":    "text",
 				"message": response,
 				"agent":   agent.GetName(),
-			}); err != nil {
-				log.Printf("Failed to send text response: %v", err)
-				return
-			}
+			})
 
 			// Time the audio generation
 			audioStart := time.Now()
 			audioData, err := agent.GenerateAndStreamAudio(ctx, response)
 			audioGenerationTime := time.Since(audioStart)
 			if err != nil {
-				log.Printf("Failed to generate audio: %v", err)
+				log.Printf("Failed to generate audio server: %v", err)
+				s.lastAudioStart = time.Now()
+				s.requiredDelay = 5 * time.Second
 				continue
 			}
 
 			audioDuration := getAudioDuration(audioData)
+			go func() {
+				// Wait for the audio to finish
+				time.Sleep(audioDuration)
+				
+				// Now score the response
+				score, err := s.scorer.ScoreArgument(ctx, response, "Bear vs Tiger: Who would win in a fight?")
+				if err != nil {
+					log.Printf("Error scoring response: %v", err)
+					return
+				}
+				// Agents arguments are two times less impactful as compared to the player's
+				if (agent.GetName() == TIGER_AGENT) {
+					agent1Score = agent1Score + int(score.Average)/2
+					agent2Score = agent2Score - int(score.Average)/2
+				} else {
+					agent2Score = agent2Score + int(score.Average)/2
+					agent1Score = agent1Score - int(score.Average)/2
+				}
+				log.Printf("------------------>%s scored %d points <---------------", agent.GetName(), int(score.Average))
+		
+				s.broadcastMessage(gin.H{
+					"type": "game_score",
+					"gameScore": gin.H{
+						TIGER_AGENT: agent1Score,
+						BEAR_AGENT: agent2Score,
+					},
+				})
+				
+			
+				// Handle the score result here
+				log.Printf("Score calculated after audio delay: %v", score)
+			}()
+
 			audioID := fmt.Sprintf("%s_%d", agent.GetName(), time.Now().UnixNano())
 
 			s.cacheMutex.Lock()
@@ -628,15 +884,13 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn) {
 			}
 			s.cacheMutex.Unlock()
 
-			if err := ws.WriteJSON(gin.H{
+			// Broadcast audio URL to all clients
+			s.broadcastMessage(gin.H{
 				"type":     "audio",
 				"audioUrl": fmt.Sprintf("/api/audio/%s", audioID),
 				"agent":    agent.GetName(),
 				"duration": audioDuration.Seconds(),
-			}); err != nil {
-				log.Printf("Failed to send audio URL: %v", err)
-				return
-			}
+			})
 
 			// Calculate total generation time for this message
 			totalGenerationTime := time.Since(generationStart)

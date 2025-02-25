@@ -131,7 +131,7 @@ func (c *Conversation) Start(ctx context.Context) error {
 		// Generate audio
 		audioData, err := currentAgent.GenerateAndStreamAudio(ctx, response)
 		if err != nil {
-			return fmt.Errorf("failed to generate audio: %v", err)
+			return fmt.Errorf("failed to generate audio conversation: %v", err)
 		}
 
 		// Log the generated response and audio

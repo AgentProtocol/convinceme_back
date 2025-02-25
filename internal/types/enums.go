@@ -15,23 +15,8 @@ const (
 type Voice string
 
 const (
-	// VoiceAlloy - A versatile, neutral voice that maintains clarity and engagement
-	VoiceAlloy Voice = "alloy"
-
-	// VoiceEcho - A baritone voice with depth and warmth, good for narration
-	VoiceEcho Voice = "echo"
-
-	// VoiceFable - A youthful voice with a bright and optimistic tone
-	VoiceFable Voice = "fable"
-
-	// VoiceOnyx - A deep and authoritative male voice with gravitas
-	VoiceOnyx Voice = "onyx"
-
-	// VoiceNova - A feminine voice with a professional and welcoming tone
-	VoiceNova Voice = "nova"
-
-	// VoiceShimmer - A clear, energetic voice with a friendly character
-	VoiceShimmer Voice = "shimmer"
+	VoiceMark  Voice = "mark"
+	VoiceFinn  Voice = "finn"
 )
 
 // IsValid checks if the ResponseStyle is valid
@@ -52,7 +37,7 @@ func (s ResponseStyle) String() string {
 // IsValid checks if the Voice is valid
 func (v Voice) IsValid() bool {
 	switch v {
-	case VoiceAlloy, VoiceEcho, VoiceFable, VoiceOnyx, VoiceNova, VoiceShimmer:
+	case VoiceMark, VoiceFinn:
 		return true
 	}
 	return false

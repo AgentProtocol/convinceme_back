@@ -268,7 +268,12 @@
 
             const messageContent = document.createElement('div');
             messageContent.className = 'message-content';
-            messageContent.textContent = message;
+            // Add player queue number prefix if available
+            if (isUser && data.queueNumber) {
+                messageContent.textContent = `Player ${data.queueNumber} message: ${message}`;
+            } else {
+                messageContent.textContent = message;
+            }
             messageDiv.appendChild(messageContent);
 
             // Add score and role display for user messages
@@ -424,6 +429,13 @@
                 return;
             }
 
+            if (data.type === 'message') {
+                // Display message from other clients
+                const isUser = data.agent === playerId;
+                addMessage(data.content, isUser, isUser ? '' : `Player ${data.queueNumber}`);
+                return;
+            }
+
             if (data.type === 'argument') {
                 const argument = data.argument;
                 log(`Argument Analysis:\nSide: ${argument.Side}\nScore: ${argument.Score.Average.toFixed(1)}/100\nStrength: ${argument.Score.Strength}/100\nLogic: ${argument.Score.Logic}/100`, 'argument');
@@ -431,7 +443,6 @@
             }
 
             if (data.type === 'score' && data.message) {
-                // Extract scores using regex
                 const avgMatch = data.message.match(/Average:\s*([\d.]+)/);
                 const agent1Match = data.message.match(/Agent1_support:\s*(\d+)/);
                 const agent2Match = data.message.match(/Agent2_support:\s*(\d+)/);
@@ -546,7 +557,7 @@
                             const message = {
                                 type: 'text',
                                 message: data.text,
-                                topic: 'Bear vs Tiger: Who is the superior predator?'
+                                topic: 'Are memecoins net negative or positive for the crypto space?'
                             };
                             ws.send(JSON.stringify(message));
                             addMessage(data.text, true);
@@ -564,6 +575,15 @@
                 });
         }
 
+        function generateUniquePlayerId() {
+            const timestamp = new Date().getTime();
+            const random = Math.floor(Math.random() * 10000);
+            return `player_${timestamp}_${random}`;
+        }
+
+        // Initialize player ID when the page loads
+        const playerId = generateUniquePlayerId();
+
         function sendMessage() {
             const messageInput = document.getElementById('message');
             const message = messageInput.value.trim();
@@ -571,15 +591,13 @@
             if (ws && ws.readyState === WebSocket.OPEN) {
                 const data = {
                     message: message,
-                    topic: 'Bear vs Tiger: Who is the superior predator?',
+                    topic: 'Are memecoins net negative or positive for the crypto space?',
                     player_id: 'player1'
                 };
 
                 ws.send(JSON.stringify(data));
                 if (message) {
-                    // Store the message temporarily until we get the score
                     window.lastUserMessage = message;
-                    // Don't add the message yet - wait for the score
                 }
                 messageInput.value = '';
             }
