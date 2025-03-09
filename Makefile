@@ -6,9 +6,13 @@ SCHEMA_PATH := sql/schema.sql
 QUERY_PATH := sql/queries.sql
 
 # DeployMe
-.PHONY: deploy
+.PHONY: deploy stop up logs ps
+up:
+	docker compose up --build -d
 deploy:
-	docker compose up --build
+	docker compose start
+stop logs ps:
+	docker compose $@
 
 # Directory structure
 .PHONY: dirs
