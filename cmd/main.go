@@ -36,6 +36,11 @@ func main() {
 		logger.Fatalf("ELEVENLABS_API_KEY is not set in the environment variables")
 	}
 
+	// Check which TTS provider to use (defaults to ElevenLabs if not set)
+	// Set to "openai" to use OpenAI's TTS service instead of ElevenLabs
+	ttsProvider := os.Getenv("TTS_PROVIDER")
+	logger.Printf("Using TTS provider: %s", ttsProvider)
+
 	// Check if HTTPS should be used
 	useHTTPS := os.Getenv("USE_HTTPS") == "true"
 
@@ -63,13 +68,13 @@ func main() {
 		logger.Fatalf("Failed to load midcurver config: %v", err)
 	}
 
-	// Create agents with both API keys
-	agent1, err := agent.NewAgent(openAIKey, elevenLabsKey, agent1Config)
+	// Create agents with OpenAI API key
+	agent1, err := agent.NewAgent(openAIKey, agent1Config)
 	if err != nil {
 		logger.Fatalf("Failed to create agent1: %v", err)
 	}
 
-	agent2, err := agent.NewAgent(openAIKey, elevenLabsKey, agent2Config)
+	agent2, err := agent.NewAgent(openAIKey, agent2Config)
 	if err != nil {
 		logger.Fatalf("Failed to create agent2: %v", err)
 	}
@@ -82,12 +87,12 @@ func main() {
 
 	// Create conversation configuration
 	convConfig := conversation.ConversationConfig{
-		Topic:           commonTopic,
-		MaxTurns:        10,
-		TurnDelay:       500 * time.Millisecond,
-		ResponseStyle:   types.ResponseStyleDebate, // Changed to debate style
-		MaxCompletionTokens:       150,                       // Increased tokens for more detailed responses
-		TemperatureHigh: true,
+		Topic:               commonTopic,
+		MaxTurns:            10,
+		TurnDelay:           500 * time.Millisecond,
+		ResponseStyle:       types.ResponseStyleDebate, // Changed to debate style
+		MaxCompletionTokens: 150,                       // Increased tokens for more detailed responses
+		TemperatureHigh:     true,
 	}
 
 	// Create a new conversation with the common topic
@@ -103,7 +108,7 @@ func main() {
 	serverConfig := &server.Config{
 		Port:          ":8080",
 		OpenAIKey:     openAIKey,
-		ElevenLabsKey: elevenLabsKey,  // Add ElevenLabs key
+		ElevenLabsKey: elevenLabsKey, // Use ElevenLabs key
 		ResponseDelay: 500,
 	}
 

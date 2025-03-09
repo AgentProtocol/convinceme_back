@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"sync"
 	"time"
+	"math"
 
 	"github.com/neo/convinceme_backend/internal/audio"
 	"github.com/neo/convinceme_backend/internal/conversation"
@@ -491,6 +492,7 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 		if err != nil {
 			log.Printf("Failed to score user message: %v", err)
 		} else {
+			score.Average = math.Round(score.Average * 3)
 			// Save argument and score to database
 			// Determine which side the argument supports based on agent support scores
 
@@ -695,7 +697,7 @@ For the Analyst:
 - "While you're chasing pumps, actual DeFi protocols generated $69M in real revenue last month"
 - "Memecoins are a scam and a waste of time and literally bankrupted thousands of people"
 
-Keep it spicy, keep it authentic to your character, but make your points count!`, conversationContext, playerMessage, agentName, agentRole)
+Keep it spicy, keep it authentic to your character, but make your points count!`, conversationContext, agentName, agentRole)
 	}
 }
 
@@ -851,13 +853,15 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn, conversationID int)
 					log.Printf("Error scoring response: %v", err)
 					return
 				}
+				score.Average = math.Round(score.Average * 2)
+
 				// Agents arguments are two times less impactful as compared to the player's
 				if (agent.GetName() == TIGER_AGENT) {
-					agent1Score = agent1Score + int(score.Average)/2
-					agent2Score = agent2Score - int(score.Average)/2
+					agent1Score = agent1Score + int(score.Average)
+					agent2Score = agent2Score - int(score.Average)
 				} else {
-					agent2Score = agent2Score + int(score.Average)/2
-					agent1Score = agent1Score - int(score.Average)/2
+					agent2Score = agent2Score + int(score.Average)
+					agent1Score = agent1Score - int(score.Average)
 				}
 				log.Printf("------------------>%s scored %d points <---------------", agent.GetName(), int(score.Average))
 		
