@@ -8,11 +8,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"strconv"
 	"sync"
 	"time"
-	"math"
 
 	"github.com/neo/convinceme_backend/internal/audio"
 	"github.com/neo/convinceme_backend/internal/conversation"
@@ -492,9 +492,11 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 		if err != nil {
 			log.Printf("Failed to score user message: %v", err)
 		} else {
-			score.Average = math.Round(score.Average * 3)
+			// Convert to 0-10 scale and square the value
+			scaledScore := math.Round(score.Average)
+			score.Average = scaledScore * scaledScore
 			// Save argument and score to database
-			// Determine which side the argument supports based on agent support scores
+			// Determine which side the argument supports based on squared score
 
 			log.Printf("Argument supports: %s", msg.Side)
 
@@ -570,7 +572,7 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 			agent2Score = agent2Score + int(score.Average)
 			agent1Score = agent1Score - int(score.Average)
 		}
-		log.Printf("%s scored %d points ", msg.Side, int(score.Average))
+		log.Printf("%s scored %d points", msg.Side, int(score.Average))
 
 		s.broadcastMessage(gin.H{
 			"type": "game_score",
@@ -579,6 +581,37 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 				agent2Name: agent2Score,
 			},
 		})
+
+		// Check if any agent has reached 0 or negative score (win condition)
+		if agent1Score <= 0 || agent2Score <= 0 {
+			var winner, loser string
+			if agent1Score <= 0 {
+				winner = BEAR_AGENT
+				loser = TIGER_AGENT
+			} else {
+				winner = TIGER_AGENT
+				loser = BEAR_AGENT
+			}
+
+			log.Printf("GAME OVER: %s has won the debate! %s has been defeated.", winner, loser)
+
+			// Send game over message
+			s.broadcastMessage(gin.H{
+				"type":    "game_over",
+				"winner":  winner,
+				"loser":   loser,
+				"message": fmt.Sprintf("%s has won the debate! %s has been defeated.", winner, loser),
+				"final_score": gin.H{
+					TIGER_AGENT: agent1Score,
+					BEAR_AGENT:  agent2Score,
+				},
+			})
+
+			// End the conversation
+			close(s.stopDiscussion)
+		}
+
+		log.Printf("Score calculated after audio delay: %v", score)
 	}
 }
 
@@ -661,7 +694,7 @@ SAMPLE ANTI-MEMECOIN ARGUMENTS (BRADFORD ONLY):
 "The average memecoin holder's portfolio duration is shorter than a TikTok attention span - speedrunning from FOMO to food stamps"
 
 
-Keep responses focused on the core debate about memecoin impact on crypto.`, conversationContext, agentName, agentRole)
+Keep responses focused on the core debate about memecoin impact on crypto.%%`, conversationContext, agentName, agentRole)
 		// This is the prompt when there's a player message
 	default:
 		return fmt.Sprintf(`Current conversation context: %s
@@ -846,17 +879,19 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn, conversationID int)
 			go func() {
 				// Wait for the audio to finish
 				time.Sleep(audioDuration)
-				
+
 				// Now score the response
 				score, err := s.scorer.ScoreArgument(ctx, response, "Bear vs Tiger: Who would win in a fight?")
 				if err != nil {
 					log.Printf("Error scoring response: %v", err)
 					return
 				}
-				score.Average = math.Round(score.Average * 2)
+				// Convert to 0-10 scale and square the value
+				scaledScore := math.Round(score.Average)
+				score.Average = scaledScore * scaledScore
 
-				// Agents arguments are two times less impactful as compared to the player's
-				if (agent.GetName() == TIGER_AGENT) {
+				// Agents arguments impact based on squared score
+				if agent.GetName() == TIGER_AGENT {
 					agent1Score = agent1Score + int(score.Average)
 					agent2Score = agent2Score - int(score.Average)
 				} else {
@@ -864,17 +899,44 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn, conversationID int)
 					agent1Score = agent1Score - int(score.Average)
 				}
 				log.Printf("------------------>%s scored %d points <---------------", agent.GetName(), int(score.Average))
-		
+
 				s.broadcastMessage(gin.H{
 					"type": "game_score",
 					"gameScore": gin.H{
 						TIGER_AGENT: agent1Score,
-						BEAR_AGENT: agent2Score,
+						BEAR_AGENT:  agent2Score,
 					},
 				})
-				
-			
-				// Handle the score result here
+
+				// Check if any agent has reached 0 or negative score (win condition)
+				if agent1Score <= 0 || agent2Score <= 0 {
+					var winner, loser string
+					if agent1Score <= 0 {
+						winner = BEAR_AGENT
+						loser = TIGER_AGENT
+					} else {
+						winner = TIGER_AGENT
+						loser = BEAR_AGENT
+					}
+
+					log.Printf("GAME OVER: %s has won the debate! %s has been defeated.", winner, loser)
+
+					// Send game over message
+					s.broadcastMessage(gin.H{
+						"type":    "game_over",
+						"winner":  winner,
+						"loser":   loser,
+						"message": fmt.Sprintf("%s has won the debate! %s has been defeated.", winner, loser),
+						"final_score": gin.H{
+							TIGER_AGENT: agent1Score,
+							BEAR_AGENT:  agent2Score,
+						},
+					})
+
+					// End the conversation
+					close(s.stopDiscussion)
+				}
+
 				log.Printf("Score calculated after audio delay: %v", score)
 			}()
 
