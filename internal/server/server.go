@@ -574,11 +574,19 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 		}
 		log.Printf("%s scored %d points", msg.Side, int(score.Average))
 
+		// Normalize scores to 0-10 range for client display
+		normalizedAgent1Score := math.Max(0, math.Min(10, float64(agent1Score)/float64(MAX_SCORE)*10))
+		normalizedAgent2Score := math.Max(0, math.Min(10, float64(agent2Score)/float64(MAX_SCORE)*10))
+
 		s.broadcastMessage(gin.H{
 			"type": "game_score",
 			"gameScore": gin.H{
-				agent1Name: agent1Score,
-				agent2Name: agent2Score,
+				TIGER_AGENT: normalizedAgent1Score,
+				BEAR_AGENT:  normalizedAgent2Score,
+			},
+			"internalScore": gin.H{
+				TIGER_AGENT: agent1Score,
+				BEAR_AGENT:  agent2Score,
 			},
 		})
 
@@ -595,13 +603,21 @@ func (s *Server) handlePlayerMessage(ws *websocket.Conn, msg ConversationMessage
 
 			log.Printf("GAME OVER: %s has won the debate! %s has been defeated.", winner, loser)
 
+			// Normalize scores to 0-10 range for client display
+			normalizedAgent1Score := math.Max(0, math.Min(10, float64(agent1Score)/float64(MAX_SCORE)*10))
+			normalizedAgent2Score := math.Max(0, math.Min(10, float64(agent2Score)/float64(MAX_SCORE)*10))
+
 			// Send game over message
 			s.broadcastMessage(gin.H{
 				"type":    "game_over",
 				"winner":  winner,
 				"loser":   loser,
 				"message": fmt.Sprintf("%s has won the debate! %s has been defeated.", winner, loser),
-				"final_score": gin.H{
+				"normalized_score": gin.H{
+					TIGER_AGENT: normalizedAgent1Score,
+					BEAR_AGENT:  normalizedAgent2Score,
+				},
+				"internal_score": gin.H{
 					TIGER_AGENT: agent1Score,
 					BEAR_AGENT:  agent2Score,
 				},
@@ -900,9 +916,17 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn, conversationID int)
 				}
 				log.Printf("------------------>%s scored %d points <---------------", agent.GetName(), int(score.Average))
 
+				// Normalize scores to 0-10 range for client display
+				normalizedAgent1Score := math.Max(0, math.Min(10, float64(agent1Score)/float64(MAX_SCORE)*10))
+				normalizedAgent2Score := math.Max(0, math.Min(10, float64(agent2Score)/float64(MAX_SCORE)*10))
+
 				s.broadcastMessage(gin.H{
 					"type": "game_score",
 					"gameScore": gin.H{
+						TIGER_AGENT: normalizedAgent1Score,
+						BEAR_AGENT:  normalizedAgent2Score,
+					},
+					"internalScore": gin.H{
 						TIGER_AGENT: agent1Score,
 						BEAR_AGENT:  agent2Score,
 					},
@@ -921,13 +945,21 @@ func (s *Server) continueAgentDiscussion(ws *websocket.Conn, conversationID int)
 
 					log.Printf("GAME OVER: %s has won the debate! %s has been defeated.", winner, loser)
 
+					// Normalize scores to 0-10 range for client display
+					normalizedAgent1Score := math.Max(0, math.Min(10, float64(agent1Score)/float64(MAX_SCORE)*10))
+					normalizedAgent2Score := math.Max(0, math.Min(10, float64(agent2Score)/float64(MAX_SCORE)*10))
+
 					// Send game over message
 					s.broadcastMessage(gin.H{
 						"type":    "game_over",
 						"winner":  winner,
 						"loser":   loser,
 						"message": fmt.Sprintf("%s has won the debate! %s has been defeated.", winner, loser),
-						"final_score": gin.H{
+						"normalized_score": gin.H{
+							TIGER_AGENT: normalizedAgent1Score,
+							BEAR_AGENT:  normalizedAgent2Score,
+						},
+						"internal_score": gin.H{
 							TIGER_AGENT: agent1Score,
 							BEAR_AGENT:  agent2Score,
 						},
@@ -1037,9 +1069,20 @@ func (s *Server) getArgument(c *gin.Context) {
 
 func (s *Server) getGameScore(c *gin.Context) {
 	agent1Name, agent2Name := s.GetOrderedAgentNames()
+
+	// Normalize scores to 0-10 range for client display
+	normalizedAgent1Score := math.Max(0, math.Min(10, float64(agent1Score)/float64(MAX_SCORE)*10))
+	normalizedAgent2Score := math.Max(0, math.Min(10, float64(agent2Score)/float64(MAX_SCORE)*10))
+
 	c.JSON(http.StatusOK, gin.H{
-		agent1Name: agent1Score,
-		agent2Name: agent2Score,
+		"normalized": gin.H{
+			agent1Name: normalizedAgent1Score,
+			agent2Name: normalizedAgent2Score,
+		},
+		"internal": gin.H{
+			agent1Name: agent1Score,
+			agent2Name: agent2Score,
+		},
 	})
 }
 
