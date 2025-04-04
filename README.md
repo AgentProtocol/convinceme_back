@@ -13,6 +13,16 @@ A debate platform that allows users to create and participate in AI-powered deba
 - **API Pagination**: Paginated API responses for better performance
 - **Filtering & Sorting**: Filter and sort topics and debates
 
+## Recent Improvements
+
+- **Database Migration System**: Replaced manual schema creation with versioned migrations
+- **Pagination and Filtering**: Added support for paginated API responses and filtering options
+- **Authentication System**: Implemented JWT-based authentication with user management
+- **Testing Framework**: Added comprehensive tests for core components
+- **Performance Optimizations**: Implemented connection pooling and improved error handling
+- **Code Organization**: Improved project structure and removed redundant scripts
+- **Documentation**: Enhanced README and added code comments
+
 ## Quick Start
 
 ```bash
@@ -118,6 +128,76 @@ make test-verbose
 make test-coverage
 ```
 
+## Project Structure
+
+```
+├── cmd/                  # Command-line applications
+│   ├── main.go          # Main application entry point
+│   └── create_test_debates.go  # Utility to create test debates
+├── internal/            # Internal packages
+│   ├── agent/           # AI agent implementation
+│   ├── audio/           # Audio processing
+│   ├── auth/            # Authentication
+│   ├── database/        # Database access and models
+│   ├── scoring/         # Argument scoring
+│   └── server/          # HTTP server and API handlers
+├── migrations/          # Database migration files
+│   ├── 001_initial_schema.sql
+│   ├── 002_add_topics_table.sql
+│   ├── 003_seed_topics.sql
+│   └── 004_add_users_table.sql
+├── test.html            # Test interface for development
+└── Makefile             # Build and development commands
+```
+
+## Development Workflow
+
+1. **Setup Environment**:
+   ```bash
+   # Clone the repository
+   git clone https://github.com/AgentProtocol/convinceme_back.git
+   cd convinceme_back
+
+   # Set up environment variables
+   cp .env.example .env
+   # Edit .env with your API keys
+
+   # Install dependencies
+   make setup
+   ```
+
+2. **Database Setup**:
+   ```bash
+   # Run migrations to set up the database
+   make migrate
+
+   # Create test debates (optional)
+   make create-test-debates
+   ```
+
+3. **Run the Server**:
+   ```bash
+   make run
+   ```
+
+4. **Testing**:
+   ```bash
+   # Run all tests
+   make test
+
+   # Run specific tests
+   go test ./internal/server -v
+   ```
+
+5. **API Testing**:
+   ```bash
+   # List all topics
+   make api-topics
+
+   # Create a debate from a topic
+   make api-create-debate topic_id=1
+   ```
+
 ## Environment Setup
 
 ```bash
@@ -127,4 +207,5 @@ OPENAI_API_KEY=your_key_here
 # Optional
 USE_HTTPS=false  # Enable for HTTPS
 JWT_SECRET=your_secret_key  # Secret for JWT authentication
+PORT=8080        # Server port (default: 8080)
 ```
