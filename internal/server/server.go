@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/neo/convinceme_backend/internal/audio"
+	"github.com/neo/convinceme_backend/internal/auth"
 	"github.com/neo/convinceme_backend/internal/conversation"
 	"github.com/quic-go/quic-go/http3"
 
@@ -36,6 +37,7 @@ type Server struct {
 	scorer        *scoring.Scorer
 	db            *database.Database
 	debateManager *DebateManager // Manages all debate sessions
+	auth          *auth.Auth     // Authentication handler
 }
 
 // DebateEntry struct remains here for now, might move if logging moves entirely
@@ -84,6 +86,12 @@ func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey str
 	// Initialize Debate Manager
 	debateManager := NewDebateManager(db, agents, apiKey)
 
+	// Initialize Auth handler
+	authHandler := auth.New(auth.Config{
+		JWTSecret:     config.JWTSecret,
+		TokenDuration: 24 * time.Hour, // Tokens valid for 24 hours
+	})
+
 	router := gin.Default()
 
 	router.Use(func(c *gin.Context) {
@@ -118,6 +126,7 @@ func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey str
 		scorer:        scorer, // Scorer might be passed to sessions later
 		db:            db,
 		debateManager: debateManager, // Assign the manager
+		auth:          authHandler,   // Authentication handler
 		// Removed initialization of conversation-specific fields
 	}
 
@@ -139,6 +148,14 @@ func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey str
 	router.GET("/api/topics", server.listTopicsHandler)                              // List all available topics
 	router.GET("/api/topics/category/:category", server.listTopicsByCategoryHandler) // List topics by category
 	router.GET("/api/topics/:id", server.getTopicHandler)                            // Get specific topic details
+
+	// Authentication endpoints
+	router.POST("/api/auth/register", server.registerHandler)                                            // Register a new user
+	router.POST("/api/auth/login", server.loginHandler)                                                  // Login
+	router.GET("/api/auth/me", server.auth.AuthMiddleware(), server.meHandler)                           // Get current user
+	router.PUT("/api/auth/me", server.auth.AuthMiddleware(), server.updateUserHandler)                   // Update current user
+	router.POST("/api/auth/change-password", server.auth.AuthMiddleware(), server.changePasswordHandler) // Change password
+	router.DELETE("/api/auth/me", server.auth.AuthMiddleware(), server.deleteUserHandler)                // Delete current user
 
 	// Update static file routes
 	router.StaticFile("/", "./static/lobby.html") // Use lobby as main page
@@ -230,30 +247,51 @@ func (s *Server) createDebateHandler(c *gin.Context) {
 }
 
 func (s *Server) listDebatesHandler(c *gin.Context) {
-	// Get query parameters for filtering
-	status := c.DefaultQuery("status", "")
+	// Get pagination parameters
+	paginationParams := GetPaginationParams(c)
 
-	var debates []*database.Debate
-	var err error
+	// Get filter parameters
+	filterParams := GetFilterParams(c)
 
-	if status == "active" || status == "waiting" {
-		// Only fetch active debates
-		debates, err = s.db.ListActiveDebates()
-	} else {
-		// TODO: Implement fetching all debates with pagination
-		// For now, just fetch active ones as fallback
-		debates, err = s.db.ListActiveDebates()
-	}
+	// Special case for 'active' status to include 'waiting' debates
+	if filterParams.Status == "active" || filterParams.Status == "waiting" {
+		// Use the existing method that handles both 'active' and 'waiting' statuses
+		debates, err := s.db.ListActiveDebates()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to list debates: %v", err)})
+			return
+		}
 
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list debates", "details": err.Error()})
+		// Since we're not using pagination here, just return all debates
+		c.JSON(http.StatusOK, gin.H{
+			"debates": debates,
+			"count":   len(debates),
+		})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"debates": debates,
-		"count":   len(debates),
-	})
+	// Convert to database filter
+	filter := database.DebateFilter{
+		Status:  filterParams.Status,
+		Search:  filterParams.Search,
+		SortBy:  filterParams.SortBy,
+		SortDir: filterParams.SortDir,
+		Offset:  paginationParams.CalculateOffset(),
+		Limit:   paginationParams.PageSize,
+	}
+
+	// Get debates with pagination and filtering
+	debates, total, err := s.db.ListDebates(filter)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to list debates: %v", err)})
+		return
+	}
+
+	// Update pagination with total count
+	paginationParams.Total = total
+
+	// Send paginated response
+	SendPaginatedResponse(c, paginationParams, debates)
 }
 
 func (s *Server) getDebateHandler(c *gin.Context) {
@@ -769,18 +807,39 @@ func handleGameOver(s *Server, session *conversation.DebateSession, debateID str
 	})
 }
 
-// listTopicsHandler returns a list of all available pre-generated topics
+// listTopicsHandler returns a list of all available pre-generated topics with pagination and filtering
 func (s *Server) listTopicsHandler(c *gin.Context) {
-	topics, err := s.db.GetTopics()
+	// Get pagination parameters
+	paginationParams := GetPaginationParams(c)
+
+	// Get filter parameters
+	filterParams := GetFilterParams(c)
+
+	// Convert to database filter
+	filter := database.TopicFilter{
+		Category: filterParams.Category,
+		Search:   filterParams.Search,
+		SortBy:   filterParams.SortBy,
+		SortDir:  filterParams.SortDir,
+		Offset:   paginationParams.CalculateOffset(),
+		Limit:    paginationParams.PageSize,
+	}
+
+	// Get topics with pagination and filtering
+	topics, total, err := s.db.GetTopics(filter)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to get topics: %v", err)})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"topics": topics})
+	// Update pagination with total count
+	paginationParams.Total = total
+
+	// Send paginated response
+	SendPaginatedResponse(c, paginationParams, topics)
 }
 
-// listTopicsByCategoryHandler returns topics filtered by category
+// listTopicsByCategoryHandler returns topics filtered by category with pagination
 func (s *Server) listTopicsByCategoryHandler(c *gin.Context) {
 	category := c.Param("category")
 	if category == "" {
@@ -788,13 +847,39 @@ func (s *Server) listTopicsByCategoryHandler(c *gin.Context) {
 		return
 	}
 
-	topics, err := s.db.GetTopicsByCategory(category)
+	// Get pagination parameters
+	paginationParams := GetPaginationParams(c)
+
+	// Get filter parameters
+	filterParams := GetFilterParams(c)
+
+	// Override category with the path parameter
+	filterParams.Category = category
+
+	// Convert to database filter
+	filter := database.TopicFilter{
+		Category: category,
+		Search:   filterParams.Search,
+		SortBy:   filterParams.SortBy,
+		SortDir:  filterParams.SortDir,
+		Offset:   paginationParams.CalculateOffset(),
+		Limit:    paginationParams.PageSize,
+	}
+
+	// Get topics with pagination and filtering
+	topics, total, err := s.db.GetTopics(filter)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to get topics: %v", err)})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"topics": topics, "category": category})
+	// Update pagination with total count
+	paginationParams.Total = total
+
+	// Send paginated response with category info
+	response := BuildPaginationResponse(c, paginationParams, topics)
+	response["category"] = category
+	c.JSON(http.StatusOK, response)
 }
 
 // getTopicHandler returns details for a specific topic

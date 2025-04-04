@@ -61,19 +61,29 @@ func New(dataDir string) (*Database, error) {
 	}
 
 	dbPath := filepath.Join(dataDir, "arguments.db")
+
+	// Configure connection pool
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %v", err)
 	}
 
-	// Read and execute schema
-	schemaSQL, err := os.ReadFile("sql/schema_v2.sql")
-	if err != nil {
-		return nil, fmt.Errorf("failed to read schema: %v", err)
+	// Set connection pool settings
+	db.SetMaxOpenConns(25)                  // Maximum number of open connections
+	db.SetMaxIdleConns(10)                  // Maximum number of idle connections
+	db.SetConnMaxLifetime(30 * time.Minute) // Maximum lifetime of a connection
+	db.SetConnMaxIdleTime(10 * time.Minute) // Maximum idle time of a connection
+
+	// Verify connection
+	if err := db.Ping(); err != nil {
+		return nil, fmt.Errorf("failed to ping database: %v", err)
 	}
 
-	if _, err := db.Exec(string(schemaSQL)); err != nil {
-		return nil, fmt.Errorf("failed to create schema: %v", err)
+	// Run migrations
+	migrationManager := NewMigrationManager(db)
+	err = migrationManager.MigrateUp("migrations")
+	if err != nil {
+		return nil, fmt.Errorf("failed to run migrations: %v", err)
 	}
 
 	return &Database{db: db}, nil
@@ -254,8 +264,115 @@ func (d *Database) GetDebate(id string) (*Debate, error) {
 	return &debate, nil
 }
 
+// DebateFilter contains filter parameters for debates
+type DebateFilter struct {
+	Status  string
+	Search  string
+	SortBy  string
+	SortDir string
+	Offset  int
+	Limit   int
+}
+
+// ListDebates retrieves debates with pagination and filtering
+func (d *Database) ListDebates(filter DebateFilter) ([]*Debate, int, error) {
+	// Build the WHERE clause based on filters
+	whereClause := ""
+	args := []any{}
+
+	// Add status filter if provided
+	if filter.Status != "" {
+		whereClause = "WHERE status = ?"
+		args = append(args, filter.Status)
+	}
+
+	// Add search filter if provided
+	if filter.Search != "" {
+		if whereClause != "" {
+			whereClause += " AND "
+		} else {
+			whereClause = "WHERE "
+		}
+		// Search in topic
+		whereClause += "topic LIKE ?"
+		searchTerm := "%" + filter.Search + "%"
+		args = append(args, searchTerm)
+	}
+
+	// Build the ORDER BY clause
+	orderClause := "ORDER BY "
+	if filter.SortBy != "" {
+		orderClause += filter.SortBy
+	} else {
+		orderClause += "created_at"
+	}
+
+	if filter.SortDir != "" && filter.SortDir == "desc" {
+		orderClause += " DESC"
+	} else {
+		orderClause += " ASC"
+	}
+
+	// Count total records for pagination
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM debates %s", whereClause)
+	var total int
+	err := d.db.QueryRow(countQuery, args...).Scan(&total)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to count debates: %v", err)
+	}
+
+	// Build the main query with pagination
+	query := fmt.Sprintf(
+		`SELECT id, topic, status, agent1_name, agent2_name, created_at, ended_at, winner
+		FROM debates %s %s LIMIT ? OFFSET ?`,
+		whereClause, orderClause,
+	)
+
+	// Add pagination parameters
+	args = append(args, filter.Limit, filter.Offset)
+
+	// Execute the query
+	rows, err := d.db.Query(query, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to list debates: %v", err)
+	}
+	defer rows.Close()
+
+	var debates []*Debate
+	for rows.Next() {
+		var debate Debate
+		var endedAt, winner sql.NullString
+		err := rows.Scan(
+			&debate.ID, &debate.Topic, &debate.Status, &debate.Agent1Name, &debate.Agent2Name,
+			&debate.CreatedAt, &endedAt, &winner,
+		)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to scan debate row: %v", err)
+		}
+
+		if endedAt.Valid {
+			endTime, err := time.Parse(time.RFC3339, endedAt.String)
+			if err == nil {
+				debate.EndedAt = &endTime
+			}
+		}
+
+		if winner.Valid {
+			debate.Winner = &winner.String
+		}
+
+		debates = append(debates, &debate)
+	}
+
+	return debates, total, nil
+}
+
 // ListActiveDebates retrieves debates that are currently 'waiting' or 'active'
 func (d *Database) ListActiveDebates() ([]*Debate, error) {
+	// Note: We could use the DebateFilter here, but for now we're using a custom query
+	// that specifically looks for both 'waiting' and 'active' statuses
+
+	// Custom query for active debates (includes 'waiting' status)
 	query := `SELECT id, topic, status, agent1_name, agent2_name, created_at FROM debates WHERE status = 'waiting' OR status = 'active' ORDER BY created_at DESC`
 	rows, err := d.db.Query(query)
 	if err != nil {
@@ -278,12 +395,77 @@ func (d *Database) ListActiveDebates() ([]*Debate, error) {
 	return debates, nil
 }
 
-// GetTopics retrieves all available pre-generated topics
-func (d *Database) GetTopics() ([]*Topic, error) {
-	query := `SELECT id, title, description, agent1_name, agent1_role, agent2_name, agent2_role, category, created_at FROM topics ORDER BY id`
-	rows, err := d.db.Query(query)
+// TopicFilter contains filter parameters for topics
+type TopicFilter struct {
+	Category string
+	Search   string
+	SortBy   string
+	SortDir  string
+	Offset   int
+	Limit    int
+}
+
+// GetTopics retrieves all available pre-generated topics with pagination and filtering
+func (d *Database) GetTopics(filter TopicFilter) ([]*Topic, int, error) {
+	// Build the WHERE clause based on filters
+	whereClause := ""
+	args := []any{}
+
+	// Add category filter if provided
+	if filter.Category != "" {
+		whereClause = "WHERE category = ?"
+		args = append(args, filter.Category)
+	}
+
+	// Add search filter if provided
+	if filter.Search != "" {
+		if whereClause != "" {
+			whereClause += " AND "
+		} else {
+			whereClause = "WHERE "
+		}
+		// Search in title or description
+		whereClause += "(title LIKE ? OR description LIKE ?)"
+		searchTerm := "%" + filter.Search + "%"
+		args = append(args, searchTerm, searchTerm)
+	}
+
+	// Build the ORDER BY clause
+	orderClause := "ORDER BY "
+	if filter.SortBy != "" {
+		orderClause += filter.SortBy
+	} else {
+		orderClause += "id"
+	}
+
+	if filter.SortDir != "" && filter.SortDir == "desc" {
+		orderClause += " DESC"
+	} else {
+		orderClause += " ASC"
+	}
+
+	// Count total records for pagination
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM topics %s", whereClause)
+	var total int
+	err := d.db.QueryRow(countQuery, args...).Scan(&total)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list topics: %v", err)
+		return nil, 0, fmt.Errorf("failed to count topics: %v", err)
+	}
+
+	// Build the main query with pagination
+	query := fmt.Sprintf(
+		`SELECT id, title, description, agent1_name, agent1_role, agent2_name, agent2_role, category, created_at
+		FROM topics %s %s LIMIT ? OFFSET ?`,
+		whereClause, orderClause,
+	)
+
+	// Add pagination parameters
+	args = append(args, filter.Limit, filter.Offset)
+
+	// Execute the query
+	rows, err := d.db.Query(query, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to list topics: %v", err)
 	}
 	defer rows.Close()
 
@@ -296,7 +478,7 @@ func (d *Database) GetTopics() ([]*Topic, error) {
 			&topic.Agent2Name, &topic.Agent2Role, &category, &topic.CreatedAt,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan topic row: %v", err)
+			return nil, 0, fmt.Errorf("failed to scan topic row: %v", err)
 		}
 
 		if description.Valid {
@@ -309,7 +491,7 @@ func (d *Database) GetTopics() ([]*Topic, error) {
 		topics = append(topics, &topic)
 	}
 
-	return topics, nil
+	return topics, total, nil
 }
 
 // GetTopicsByCategory retrieves topics filtered by category
