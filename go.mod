@@ -6,12 +6,12 @@ toolchain go1.23.2
 
 require (
 	github.com/gin-gonic/gin v1.10.0
+	github.com/google/uuid v1.3.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/joho/godotenv v1.5.1
 	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/quic-go/quic-go v0.48.2
 	github.com/sashabaranov/go-openai v1.17.9
-	github.com/tcolgate/mp3 v0.0.0-20170426193717-e79c5a46d300
 	github.com/tmc/langchaingo v0.1.3
 )
 
@@ -29,7 +29,6 @@ require (
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/google/pprof v0.0.0-20241210010833-40e02aabc2ad // indirect
-	github.com/google/uuid v1.3.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.7 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect

@@ -6,12 +6,40 @@ import (
 	"os"
 	"path/filepath"
 
+	"time"
+
 	_ "github.com/mattn/go-sqlite3"
+
 	"github.com/neo/convinceme_backend/internal/scoring"
 )
 
 type Database struct {
 	db *sql.DB
+}
+
+// Debate represents a debate session in the database
+type Debate struct {
+	ID         string     `json:"id"`
+	Topic      string     `json:"topic"`
+	Status     string     `json:"status"`
+	Agent1Name string     `json:"agent1_name"`
+	Agent2Name string     `json:"agent2_name"`
+	CreatedAt  time.Time  `json:"created_at"`
+	EndedAt    *time.Time `json:"ended_at,omitempty"` // Use pointer for nullable timestamp
+	Winner     *string    `json:"winner,omitempty"`   // Use pointer for nullable string
+}
+
+// Topic represents a pre-generated debate topic with agent pairings
+type Topic struct {
+	ID          int       `json:"id"`
+	Title       string    `json:"title"`
+	Description string    `json:"description,omitempty"`
+	Agent1Name  string    `json:"agent1_name"`
+	Agent1Role  string    `json:"agent1_role"`
+	Agent2Name  string    `json:"agent2_name"`
+	Agent2Role  string    `json:"agent2_role"`
+	Category    string    `json:"category,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // Argument represents a player's argument in the database
@@ -21,6 +49,7 @@ type Argument struct {
 	Topic     string                 `json:"topic"`
 	Content   string                 `json:"content"`
 	Side      string                 `json:"side"`
+	DebateID  *string                `json:"debate_id,omitempty"` // Use pointer for nullable string
 	CreatedAt string                 `json:"created_at"`
 	Score     *scoring.ArgumentScore `json:"score,omitempty"`
 }
@@ -38,7 +67,7 @@ func New(dataDir string) (*Database, error) {
 	}
 
 	// Read and execute schema
-	schemaSQL, err := os.ReadFile("sql/schema.sql")
+	schemaSQL, err := os.ReadFile("sql/schema_v2.sql")
 	if err != nil {
 		return nil, fmt.Errorf("failed to read schema: %v", err)
 	}
@@ -55,10 +84,10 @@ func (d *Database) Close() error {
 	return d.db.Close()
 }
 
-// SaveArgument saves a new argument to the database
-func (d *Database) SaveArgument(playerID, topic, content, side string) (int64, error) {
-	query := `INSERT INTO arguments (player_id, topic, content, side) VALUES (?, ?, ?, ?)`
-	result, err := d.db.Exec(query, playerID, topic, content, side)
+// SaveArgument saves a new argument to the database, linking it to a debate
+func (d *Database) SaveArgument(playerID, topic, content, side, debateID string) (int64, error) {
+	query := `INSERT INTO arguments (player_id, topic, content, side, debate_id) VALUES (?, ?, ?, ?, ?)`
+	result, err := d.db.Exec(query, playerID, topic, content, side, debateID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to save argument: %v", err)
 	}
@@ -66,16 +95,16 @@ func (d *Database) SaveArgument(playerID, topic, content, side string) (int64, e
 	return result.LastInsertId()
 }
 
-// SaveScore saves a score for an argument
-func (d *Database) SaveScore(argumentID int64, score *scoring.ArgumentScore) error {
-	query := `INSERT INTO scores (argument_id, strength, relevance, logic, truth, humor, average, explanation)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+// SaveScore saves a score for an argument, linking it to a debate
+func (d *Database) SaveScore(argumentID int64, debateID string, score *scoring.ArgumentScore) error {
+	query := `INSERT INTO scores (argument_id, debate_id, strength, relevance, logic, truth, humor, average, explanation)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
-	_, err := d.db.Exec(query, argumentID, score.Strength, score.Relevance, score.Logic,
+	_, err := d.db.Exec(query, argumentID, debateID, score.Strength, score.Relevance, score.Logic,
 		score.Truth, score.Humor, score.Average, score.Explanation)
 
 	if err != nil {
-		return fmt.Errorf("failed to save score: %v", err)
+		return fmt.Errorf("failed to save score for debate %s: %v", debateID, err)
 	}
 
 	return nil
@@ -84,7 +113,7 @@ func (d *Database) SaveScore(argumentID int64, score *scoring.ArgumentScore) err
 // GetArgumentWithScore retrieves an argument and its score by ID
 func (d *Database) GetArgumentWithScore(id int64) (*Argument, error) {
 	query := `
-		SELECT a.id, a.player_id, a.topic, a.content, a.side, a.created_at,
+		SELECT a.id, a.player_id, a.topic, a.content, a.side, a.debate_id, a.created_at,
 			   s.strength, s.relevance, s.logic, s.truth, s.humor, s.average, s.explanation
 		FROM arguments a
 		LEFT JOIN scores s ON a.id = s.argument_id
@@ -92,27 +121,34 @@ func (d *Database) GetArgumentWithScore(id int64) (*Argument, error) {
 
 	var arg Argument
 	var score scoring.ArgumentScore
+	// Use sql.NullString for nullable debate_id
+	var debateID sql.NullString
 
 	err := d.db.QueryRow(query, id).Scan(
-		&arg.ID, &arg.PlayerID, &arg.Topic, &arg.Content, &arg.Side, &arg.CreatedAt,
+		&arg.ID, &arg.PlayerID, &arg.Topic, &arg.Content, &arg.Side, &debateID, &arg.CreatedAt,
 		&score.Strength, &score.Relevance, &score.Logic, &score.Truth, &score.Humor,
 		&score.Average, &score.Explanation,
 	)
 
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("argument not found")
+		return nil, fmt.Errorf("argument %d not found", id)
 	} else if err != nil {
 		return nil, fmt.Errorf("failed to get argument: %v", err)
+	}
+
+	if debateID.Valid {
+		arg.DebateID = &debateID.String
 	}
 
 	arg.Score = &score
 	return &arg, nil
 }
 
-// GetAllArguments retrieves all arguments with their scores
+// GetAllArguments retrieves the last 100 arguments with their scores
+// Consider adding filtering by debate_id if needed later
 func (d *Database) GetAllArguments() ([]*Argument, error) {
 	query := `
-		SELECT a.id, a.player_id, a.topic, a.content, a.side, a.created_at,
+		SELECT a.id, a.player_id, a.topic, a.content, a.side, a.debate_id, a.created_at,
 			   s.strength, s.relevance, s.logic, s.truth, s.humor, s.average, s.explanation
 		FROM arguments a
 		LEFT JOIN scores s ON a.id = s.argument_id
@@ -121,7 +157,7 @@ func (d *Database) GetAllArguments() ([]*Argument, error) {
 
 	rows, err := d.db.Query(query)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query arguments: %v", err)
+		return nil, fmt.Errorf("failed to query all arguments: %v", err)
 	}
 	defer rows.Close()
 
@@ -129,19 +165,212 @@ func (d *Database) GetAllArguments() ([]*Argument, error) {
 	for rows.Next() {
 		var arg Argument
 		var score scoring.ArgumentScore
+		var debateID sql.NullString
 
 		err := rows.Scan(
-			&arg.ID, &arg.PlayerID, &arg.Topic, &arg.Content, &arg.Side, &arg.CreatedAt,
+			&arg.ID, &arg.PlayerID, &arg.Topic, &arg.Content, &arg.Side, &debateID, &arg.CreatedAt,
 			&score.Strength, &score.Relevance, &score.Logic, &score.Truth, &score.Humor,
 			&score.Average, &score.Explanation,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan argument: %v", err)
+			return nil, fmt.Errorf("failed to scan argument row: %v", err)
 		}
 
+		if debateID.Valid {
+			arg.DebateID = &debateID.String
+		}
 		arg.Score = &score
 		arguments = append(arguments, &arg)
 	}
 
 	return arguments, nil
+}
+
+// --- Debate Management Functions ---
+
+// CreateDebate adds a new debate session to the database
+func (d *Database) CreateDebate(id, topic, status, agent1Name, agent2Name string) error {
+	query := `INSERT INTO debates (id, topic, status, agent1_name, agent2_name) VALUES (?, ?, ?, ?, ?)`
+	_, err := d.db.Exec(query, id, topic, status, agent1Name, agent2Name)
+	if err != nil {
+		return fmt.Errorf("failed to create debate %s: %v", id, err)
+	}
+	return nil
+}
+
+// UpdateDebateStatus updates the status of a specific debate
+func (d *Database) UpdateDebateStatus(id, status string) error {
+	query := `UPDATE debates SET status = ? WHERE id = ?`
+	result, err := d.db.Exec(query, status, id)
+	if err != nil {
+		return fmt.Errorf("failed to update status for debate %s: %v", id, err)
+	}
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		return fmt.Errorf("debate %s not found for status update", id)
+	}
+	return nil
+}
+
+// UpdateDebateEnd marks a debate as finished, setting the end time and winner
+func (d *Database) UpdateDebateEnd(id, status, winner string) error {
+	query := `UPDATE debates SET status = ?, ended_at = CURRENT_TIMESTAMP, winner = ? WHERE id = ?`
+	result, err := d.db.Exec(query, status, winner, id)
+	if err != nil {
+		return fmt.Errorf("failed to end debate %s: %v", id, err)
+	}
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		return fmt.Errorf("debate %s not found for ending", id)
+	}
+	return nil
+}
+
+// GetDebate retrieves a specific debate by its ID
+func (d *Database) GetDebate(id string) (*Debate, error) {
+	query := `SELECT id, topic, status, agent1_name, agent2_name, created_at, ended_at, winner FROM debates WHERE id = ?`
+	var debate Debate
+	var endedAt sql.NullTime
+	var winner sql.NullString
+
+	err := d.db.QueryRow(query, id).Scan(
+		&debate.ID, &debate.Topic, &debate.Status, &debate.Agent1Name, &debate.Agent2Name,
+		&debate.CreatedAt, &endedAt, &winner,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("debate %s not found", id)
+	} else if err != nil {
+		return nil, fmt.Errorf("failed to get debate %s: %v", id, err)
+	}
+
+	if endedAt.Valid {
+		debate.EndedAt = &endedAt.Time
+	}
+	if winner.Valid {
+		debate.Winner = &winner.String
+	}
+
+	return &debate, nil
+}
+
+// ListActiveDebates retrieves debates that are currently 'waiting' or 'active'
+func (d *Database) ListActiveDebates() ([]*Debate, error) {
+	query := `SELECT id, topic, status, agent1_name, agent2_name, created_at FROM debates WHERE status = 'waiting' OR status = 'active' ORDER BY created_at DESC`
+	rows, err := d.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list active debates: %v", err)
+	}
+	defer rows.Close()
+
+	var debates []*Debate
+	for rows.Next() {
+		var debate Debate
+		err := rows.Scan(
+			&debate.ID, &debate.Topic, &debate.Status, &debate.Agent1Name, &debate.Agent2Name, &debate.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan active debate row: %v", err)
+		}
+		debates = append(debates, &debate)
+	}
+
+	return debates, nil
+}
+
+// GetTopics retrieves all available pre-generated topics
+func (d *Database) GetTopics() ([]*Topic, error) {
+	query := `SELECT id, title, description, agent1_name, agent1_role, agent2_name, agent2_role, category, created_at FROM topics ORDER BY id`
+	rows, err := d.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list topics: %v", err)
+	}
+	defer rows.Close()
+
+	var topics []*Topic
+	for rows.Next() {
+		var topic Topic
+		var description, category sql.NullString
+		err := rows.Scan(
+			&topic.ID, &topic.Title, &description, &topic.Agent1Name, &topic.Agent1Role,
+			&topic.Agent2Name, &topic.Agent2Role, &category, &topic.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan topic row: %v", err)
+		}
+
+		if description.Valid {
+			topic.Description = description.String
+		}
+		if category.Valid {
+			topic.Category = category.String
+		}
+
+		topics = append(topics, &topic)
+	}
+
+	return topics, nil
+}
+
+// GetTopicsByCategory retrieves topics filtered by category
+func (d *Database) GetTopicsByCategory(category string) ([]*Topic, error) {
+	query := `SELECT id, title, description, agent1_name, agent1_role, agent2_name, agent2_role, category, created_at
+			FROM topics WHERE category = ? ORDER BY id`
+	rows, err := d.db.Query(query, category)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list topics by category: %v", err)
+	}
+	defer rows.Close()
+
+	var topics []*Topic
+	for rows.Next() {
+		var topic Topic
+		var description, category sql.NullString
+		err := rows.Scan(
+			&topic.ID, &topic.Title, &description, &topic.Agent1Name, &topic.Agent1Role,
+			&topic.Agent2Name, &topic.Agent2Role, &category, &topic.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan topic row: %v", err)
+		}
+
+		if description.Valid {
+			topic.Description = description.String
+		}
+		if category.Valid {
+			topic.Category = category.String
+		}
+
+		topics = append(topics, &topic)
+	}
+
+	return topics, nil
+}
+
+// GetTopic retrieves a specific topic by ID
+func (d *Database) GetTopic(id int) (*Topic, error) {
+	query := `SELECT id, title, description, agent1_name, agent1_role, agent2_name, agent2_role, category, created_at
+			FROM topics WHERE id = ?`
+	var topic Topic
+	var description, category sql.NullString
+
+	err := d.db.QueryRow(query, id).Scan(
+		&topic.ID, &topic.Title, &description, &topic.Agent1Name, &topic.Agent1Role,
+		&topic.Agent2Name, &topic.Agent2Role, &category, &topic.CreatedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("topic with ID %d not found", id)
+	} else if err != nil {
+		return nil, fmt.Errorf("failed to get topic: %v", err)
+	}
+
+	if description.Valid {
+		topic.Description = description.String
+	}
+	if category.Valid {
+		topic.Category = category.String
+	}
+
+	return &topic, nil
 }

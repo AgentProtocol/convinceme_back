@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS arguments (
     topic TEXT NOT NULL,      -- Topic of the argument
     content TEXT NOT NULL,    -- The actual argument text
     side TEXT NOT NULL,       -- Which side the argument supports
+    debate_id TEXT,           -- Reference to the debate this argument belongs to
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -12,6 +13,7 @@ CREATE TABLE IF NOT EXISTS arguments (
 CREATE TABLE IF NOT EXISTS scores (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     argument_id INTEGER NOT NULL,
+    debate_id TEXT,           -- Reference to the debate this score belongs to
     strength INTEGER NOT NULL CHECK (strength BETWEEN 0 AND 100),
     relevance INTEGER NOT NULL CHECK (relevance BETWEEN 0 AND 100),
     logic INTEGER NOT NULL CHECK (logic BETWEEN 0 AND 100),
@@ -35,10 +37,15 @@ CREATE TABLE IF NOT EXISTS debates (
     winner TEXT NULL              -- Name of the winning agent/side
 );
 
--- Add debate_id column to arguments table
--- Note: Adding foreign key constraint might require more complex migration steps
--- if data already exists. For simplicity, we'll omit the constraint for now.
-ALTER TABLE arguments ADD COLUMN debate_id TEXT;
-
--- Add debate_id column to scores table
-ALTER TABLE scores ADD COLUMN debate_id TEXT;
+-- Topics table stores pre-generated debate topics with agent pairings
+CREATE TABLE IF NOT EXISTS topics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,                  -- The debate topic/question
+    description TEXT,                     -- Optional longer description
+    agent1_name TEXT NOT NULL,            -- Name for the first agent
+    agent1_role TEXT NOT NULL,            -- Role/position for the first agent
+    agent2_name TEXT NOT NULL,            -- Name for the second agent
+    agent2_role TEXT NOT NULL,            -- Role/position for the second agent
+    category TEXT,                        -- Optional category (e.g., "crypto", "technology", "animals")
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
