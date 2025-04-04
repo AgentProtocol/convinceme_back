@@ -72,6 +72,39 @@ db-shell:
 	@echo "Opening SQLite shell..."
 	@sqlite3 $(DB_PATH)
 
+.PHONY: reset-db
+reset-db:
+	@echo "Resetting database..."
+	@rm -f $(DB_PATH)
+	@go run cmd/main.go --init-db-only
+
+.PHONY: migrate
+migrate:
+	@echo "Running database migrations..."
+	@go run cmd/main.go --migrate-only
+
+.PHONY: create-test-debates
+create-test-debates:
+	@echo "Creating test debates..."
+	@go run cmd/create_test_debates.go
+
+# Testing commands
+.PHONY: test
+test:
+	@echo "Running tests..."
+	@go test ./...
+
+.PHONY: test-verbose
+test-verbose:
+	@echo "Running tests with verbose output..."
+	@go test -v ./...
+
+.PHONY: test-coverage
+test-coverage:
+	@echo "Running tests with coverage..."
+	@go test -coverprofile=coverage.out ./...
+	@go tool cover -html=coverage.out
+
 # API test commands
 .PHONY: api-check
 api-check:
@@ -95,6 +128,56 @@ api-start-debate:
 	@curl -s -X POST http://localhost:$(PORT)/api/conversation/start \
 		-H "Content-Type: application/json" \
 		-d '{"topic": "Are memecoins net negative or positive for the crypto space?"}' | jq '.'
+
+# Topic API endpoints
+.PHONY: api-topics
+api-topics:
+	@echo "\nListing all topics:"
+	@curl -s http://localhost:$(PORT)/api/topics | jq '.'
+
+.PHONY: api-topics-category
+api-topics-category:
+	@if [ -z "$(category)" ]; then \
+		echo "Usage: make api-topics-category category=<category_name>"; \
+		exit 1; \
+	fi
+	@echo "\nListing topics in category $(category):"
+	@curl -s http://localhost:$(PORT)/api/topics/category/$(category) | jq '.'
+
+.PHONY: api-topic
+api-topic:
+	@if [ -z "$(id)" ]; then \
+		echo "Usage: make api-topic id=<topic_id>"; \
+		exit 1; \
+	fi
+	@echo "\nGetting topic with ID $(id):"
+	@curl -s http://localhost:$(PORT)/api/topics/$(id) | jq '.'
+
+# Debate API endpoints
+.PHONY: api-debates
+api-debates:
+	@echo "\nListing all debates:"
+	@curl -s http://localhost:$(PORT)/api/debates | jq '.'
+
+.PHONY: api-debate
+api-debate:
+	@if [ -z "$(id)" ]; then \
+		echo "Usage: make api-debate id=<debate_id>"; \
+		exit 1; \
+	fi
+	@echo "\nGetting debate with ID $(id):"
+	@curl -s http://localhost:$(PORT)/api/debates/$(id) | jq '.'
+
+.PHONY: api-create-debate
+api-create-debate:
+	@if [ -z "$(topic_id)" ]; then \
+		echo "Usage: make api-create-debate topic_id=<topic_id>"; \
+		exit 1; \
+	fi
+	@echo "\nCreating debate from topic $(topic_id):"
+	@curl -s -X POST http://localhost:$(PORT)/api/debates \
+		-H "Content-Type: application/json" \
+		-d '{"topic_id": $(topic_id)}' | jq '.'
 
 # Kill server if port is in use
 .PHONY: kill-server
@@ -120,10 +203,23 @@ help:
 	@echo "\nDatabase commands:"
 	@echo "  make db-check        - Check database with SQL queries"
 	@echo "  make db-shell        - Open SQLite shell"
+	@echo "  make reset-db        - Reset database (remove and recreate)"
+	@echo "  make migrate         - Run database migrations"
+	@echo "  make create-test-debates - Create test debates for development"
+	@echo "\nTesting commands:"
+	@echo "  make test            - Run all tests"
+	@echo "  make test-verbose    - Run all tests with verbose output"
+	@echo "  make test-coverage   - Run tests with coverage report"
 	@echo "\nAPI commands:"
 	@echo "  make api-check       - Check all arguments and agents"
 	@echo "  make api-argument id=1 - Check specific argument by ID"
 	@echo "  make api-start-debate  - Start a new debate session"
+	@echo "  make api-topics      - List all topics"
+	@echo "  make api-topics-category category=crypto - List topics by category"
+	@echo "  make api-topic id=1  - Get specific topic"
+	@echo "  make api-debates     - List all debates"
+	@echo "  make api-debate id=abc123 - Get specific debate"
+	@echo "  make api-create-debate topic_id=1 - Create debate from topic"
 
 # Default target
-.DEFAULT_GOAL := help 
+.DEFAULT_GOAL := help

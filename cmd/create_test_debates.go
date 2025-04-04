@@ -1,3 +1,5 @@
+//go:build ignore
+
 package main
 
 import (
@@ -14,7 +16,7 @@ func main() {
 	// Load environment variables
 	err := godotenv.Load()
 	if err != nil {
-		log.Fatalf("Error loading .env file: %v", err)
+		log.Printf("Warning: Error loading .env file: %v", err)
 	}
 
 	// Setup database
