@@ -17,7 +17,7 @@ import (
 
 // DebateManager handles the creation, tracking, and cleanup of debate sessions
 type DebateManager struct {
-	db           *database.Database
+	db           database.DatabaseInterface
 	agents       map[string]*agent.Agent
 	debates      map[string]*conversation.DebateSession
 	debatesMutex sync.RWMutex
@@ -26,7 +26,7 @@ type DebateManager struct {
 }
 
 // NewDebateManager creates a new debate manager
-func NewDebateManager(db *database.Database, agents map[string]*agent.Agent, apiKey string) *DebateManager {
+func NewDebateManager(db database.DatabaseInterface, agents map[string]*agent.Agent, apiKey string) *DebateManager {
 	scorer, err := scoring.NewScorer(apiKey)
 	if err != nil {
 		log.Printf("Warning: Failed to initialize scorer in DebateManager: %v", err)

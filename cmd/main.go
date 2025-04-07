@@ -112,12 +112,28 @@ func main() {
 		agent2Config.Name: agent2,
 	}
 
+	// Get JWT secret from environment variables
+	jwtSecret := os.Getenv("JWT_SECRET")
+	if jwtSecret == "" {
+		jwtSecret = "default_secret_key_for_development" // Default for development
+		logger.Printf("WARNING: JWT_SECRET not set, using default value for development")
+	}
+
+	// Check if email verification is required
+	requireEmailVerification := os.Getenv("REQUIRE_EMAIL_VERIFICATION") == "true"
+
+	// Check if invitation codes are required for registration
+	requireInvitation := os.Getenv("REQUIRE_INVITATION") == "true"
+
 	// Update server config to include both API keys
 	serverConfig := &server.Config{
-		Port:          ":8080",
-		OpenAIKey:     openAIKey,
-		ElevenLabsKey: elevenLabsKey, // Use ElevenLabs key
-		ResponseDelay: 500,
+		Port:                     ":8080",
+		OpenAIKey:                openAIKey,
+		ElevenLabsKey:            elevenLabsKey, // Use ElevenLabs key
+		ResponseDelay:            500,
+		JWTSecret:                jwtSecret,
+		RequireEmailVerification: requireEmailVerification,
+		RequireInvitation:        requireInvitation,
 	}
 
 	// Create and start the server

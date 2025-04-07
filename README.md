@@ -20,7 +20,7 @@ A debate platform that allows users to create and participate in AI-powered deba
 - **Authentication System**: Implemented JWT-based authentication with user management
 - **Testing Framework**: Added comprehensive tests for core components
 - **Performance Optimizations**: Implemented connection pooling and improved error handling
-- **Code Organization**: Improved project structure and removed redundant scripts
+- **Code Organization**: Improved project structure and removed redundant scripts directory
 - **Documentation**: Enhanced README and added code comments
 
 ## Quick Start
@@ -104,14 +104,34 @@ make api-create-debate topic_id=1  # Create debate from topic
 The system uses a proper migration system to manage database schema changes:
 
 ```bash
-# Run migrations
+# Run migrations (will start the server afterward)
 make migrate
+
+# Run migrations only (without starting the server)
+make migrate-only
 
 # Reset database and run migrations
 make reset-db
 ```
 
-Migration files are stored in the `migrations` directory and are applied in order based on their numeric prefix.
+### How Migrations Work
+
+1. Migration files are stored in the `migrations/` directory
+2. Files are named with a numeric prefix (e.g., `001_initial_schema.sql`, `002_add_topics_table.sql`)
+3. Migrations are applied in sequential order based on their numeric prefix
+4. Each migration is only applied once, and the system keeps track of which migrations have been applied
+5. When you run `make migrate`, the system checks which migrations have already been applied and only runs the new ones
+
+### Adding New Migrations
+
+To add a new database change:
+
+1. Create a new SQL file in the `migrations/` directory
+2. Name it with the next sequential number (e.g., if the last migration is `007_feedback.sql`, name yours `008_your_migration.sql`)
+3. Include clear SQL statements with comments explaining the changes
+4. Run `make migrate` to apply your new migration
+
+> **Important**: Never modify existing migration files after they've been applied to a database. Instead, create a new migration file to make additional changes.
 
 ## Testing
 
@@ -138,14 +158,24 @@ make test-coverage
 │   ├── agent/           # AI agent implementation
 │   ├── audio/           # Audio processing
 │   ├── auth/            # Authentication
+│   ├── conversation/    # Conversation management
 │   ├── database/        # Database access and models
+│   ├── player/          # Player management
 │   ├── scoring/         # Argument scoring
-│   └── server/          # HTTP server and API handlers
+│   ├── server/          # HTTP server and API handlers
+│   ├── tools/           # Utility tools
+│   └── types/           # Common type definitions
 ├── migrations/          # Database migration files
-│   ├── 001_initial_schema.sql
-│   ├── 002_add_topics_table.sql
-│   ├── 003_seed_topics.sql
-│   └── 004_add_users_table.sql
+│   ├── 001_initial_schema.sql  # Base tables (arguments, scores, debates)
+│   ├── 002_add_topics_table.sql # Topics table for pre-generated debates
+│   ├── 003_seed_topics.sql      # Initial topic data
+│   ├── 004_add_users_table.sql  # User authentication
+│   ├── 005_enhance_users_table.sql # User roles and security
+│   ├── 006_invitation_codes.sql # Invitation system
+│   ├── 007_feedback.sql        # User feedback system
+│   └── 008_add_missing_indexes.sql # Performance optimization
+├── sql/                 # SQL utilities
+│   └── queries.sql       # Debugging and inspection queries
 ├── test.html            # Test interface for development
 └── Makefile             # Build and development commands
 ```

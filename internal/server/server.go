@@ -35,9 +35,10 @@ type Server struct {
 	useHTTPS      bool
 	config        *Config
 	scorer        *scoring.Scorer
-	db            *database.Database
-	debateManager *DebateManager // Manages all debate sessions
-	auth          *auth.Auth     // Authentication handler
+	db            database.DatabaseInterface
+	debateManager *DebateManager      // Manages all debate sessions
+	auth          *auth.Auth          // Authentication handler
+	featureFlags  *FeatureFlagManager // Feature flag manager
 }
 
 // DebateEntry struct remains here for now, might move if logging moves entirely
@@ -88,11 +89,21 @@ func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey str
 
 	// Initialize Auth handler
 	authHandler := auth.New(auth.Config{
-		JWTSecret:     config.JWTSecret,
-		TokenDuration: 24 * time.Hour, // Tokens valid for 24 hours
+		JWTSecret:                config.JWTSecret,
+		TokenDuration:            24 * time.Hour,     // Access tokens valid for 24 hours
+		RefreshTokenDuration:     7 * 24 * time.Hour, // Refresh tokens valid for 7 days
+		RequireEmailVerification: config.RequireEmailVerification,
+		RequireInvitation:        config.RequireInvitation,
 	})
 
-	router := gin.Default()
+	// Create a new router without default middleware
+	router := gin.New()
+
+	// Add custom middleware
+	router.Use(RequestIDMiddleware())
+	router.Use(LoggingMiddleware())
+	router.Use(RecoveryMiddleware())
+	router.Use(ErrorHandler())
 
 	router.Use(func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
@@ -117,6 +128,29 @@ func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey str
 	// var agent1, agent2 *agent.Agent
 	// for _, a := range agents { ... }
 
+	// Initialize feature flags
+	featureFlags, err := NewFeatureFlagManager("config/feature_flags.json")
+	if err != nil {
+		// Log the error but continue with default flags
+		log.Printf("Failed to initialize feature flags: %v\n", err)
+		// Create a default feature flag manager
+		featureFlags = &FeatureFlagManager{
+			configPath: "config/feature_flags.json",
+			flags: FeatureFlags{
+				RequireEmailVerification: config.RequireEmailVerification,
+				RequireInvitation:        config.RequireInvitation,
+				AllowPasswordReset:       true,
+				AllowSocialLogin:         false,
+				EnableRateLimiting:       true,
+				EnableCSRFProtection:     false,
+				EnableFeedbackCollection: true,
+				EnableAnalytics:          true,
+				EnableAdminDashboard:     true,
+			},
+			mu: sync.RWMutex{},
+		}
+	}
+
 	server := &Server{
 		router:        router,
 		agents:        agents, // Keep agents map for reference if needed by manager/server
@@ -127,6 +161,7 @@ func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey str
 		db:            db,
 		debateManager: debateManager, // Assign the manager
 		auth:          authHandler,   // Authentication handler
+		featureFlags:  featureFlags,  // Feature flag manager
 		// Removed initialization of conversation-specific fields
 	}
 
@@ -149,13 +184,17 @@ func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey str
 	router.GET("/api/topics/category/:category", server.listTopicsByCategoryHandler) // List topics by category
 	router.GET("/api/topics/:id", server.getTopicHandler)                            // Get specific topic details
 
-	// Authentication endpoints
-	router.POST("/api/auth/register", server.registerHandler)                                            // Register a new user
-	router.POST("/api/auth/login", server.loginHandler)                                                  // Login
-	router.GET("/api/auth/me", server.auth.AuthMiddleware(), server.meHandler)                           // Get current user
-	router.PUT("/api/auth/me", server.auth.AuthMiddleware(), server.updateUserHandler)                   // Update current user
-	router.POST("/api/auth/change-password", server.auth.AuthMiddleware(), server.changePasswordHandler) // Change password
-	router.DELETE("/api/auth/me", server.auth.AuthMiddleware(), server.deleteUserHandler)                // Delete current user
+	// Setup authentication routes
+	server.setupAuthRoutes()
+
+	// Setup invitation routes
+	server.setupInvitationRoutes()
+
+	// Setup feature flag routes
+	server.setupFeatureFlagRoutes()
+
+	// Setup feedback routes
+	server.setupFeedbackRoutes()
 
 	// Update static file routes
 	router.StaticFile("/", "./static/lobby.html") // Use lobby as main page

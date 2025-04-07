@@ -2,7 +2,6 @@
 PROJECT_NAME := convinceme_backend
 PORT := 8080
 DB_PATH := data/arguments.db
-SCHEMA_PATH := sql/schema.sql
 QUERY_PATH := sql/queries.sql
 
 # Directory structure
@@ -28,8 +27,8 @@ tidy:
 # Database initialization
 .PHONY: init-db
 init-db: dirs
-	@echo "Initializing database schema..."
-	@sqlite3 $(DB_PATH) < $(SCHEMA_PATH)
+	@echo "Initializing database through migrations..."
+	@go run cmd/main.go --migrate-only
 
 # Full setup
 .PHONY: setup
@@ -83,6 +82,11 @@ migrate:
 	@echo "Running database migrations..."
 	@go run cmd/main.go --migrate-only
 
+.PHONY: migrate-only
+migrate-only:
+	@echo "Running database migrations only (without starting server)..."
+	@go run cmd/migrate.go
+
 .PHONY: create-test-debates
 create-test-debates:
 	@echo "Creating test debates..."
@@ -104,6 +108,31 @@ test-coverage:
 	@echo "Running tests with coverage..."
 	@go test -coverprofile=coverage.out ./...
 	@go tool cover -html=coverage.out
+
+.PHONY: test-auth
+test-auth:
+	@echo "Running authentication tests..."
+	@go test -v ./internal/auth
+
+.PHONY: test-database
+test-database:
+	@echo "Running database tests..."
+	@go test -v ./internal/database
+
+.PHONY: test-server
+test-server:
+	@echo "Running server tests..."
+	@go test -v ./internal/server
+
+.PHONY: test-race
+test-race:
+	@echo "Running tests with race detector..."
+	@go test -race ./...
+
+.PHONY: test-short
+test-short:
+	@echo "Running short tests..."
+	@go test -short ./...
 
 # API test commands
 .PHONY: api-check
@@ -210,6 +239,11 @@ help:
 	@echo "  make test            - Run all tests"
 	@echo "  make test-verbose    - Run all tests with verbose output"
 	@echo "  make test-coverage   - Run tests with coverage report"
+	@echo "  make test-auth       - Run authentication tests only"
+	@echo "  make test-database   - Run database tests only"
+	@echo "  make test-server     - Run server tests only"
+	@echo "  make test-race       - Run tests with race detector"
+	@echo "  make test-short      - Run short tests only"
 	@echo "\nAPI commands:"
 	@echo "  make api-check       - Check all arguments and agents"
 	@echo "  make api-argument id=1 - Check specific argument by ID"

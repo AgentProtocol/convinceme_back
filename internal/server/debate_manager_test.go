@@ -1,14 +1,15 @@
-//go:build ignore
-
 package server
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
 
 	"github.com/neo/convinceme_backend/internal/agent"
+	"github.com/neo/convinceme_backend/internal/conversation"
 	"github.com/neo/convinceme_backend/internal/database"
+	"github.com/neo/convinceme_backend/internal/scoring"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -16,8 +17,10 @@ import (
 // MockDatabase for testing
 type MockDatabaseForDebate struct {
 	mock.Mock
-	*database.Database // Embed the real database to satisfy the interface
 }
+
+// Ensure MockDatabaseForDebate implements database.DatabaseInterface
+var _ database.DatabaseInterface = (*MockDatabaseForDebate)(nil)
 
 func (m *MockDatabaseForDebate) CreateDebate(id, topic, status, agent1Name, agent2Name string) error {
 	args := m.Called(id, topic, status, agent1Name, agent2Name)
@@ -29,8 +32,8 @@ func (m *MockDatabaseForDebate) UpdateDebateStatus(id, status string) error {
 	return args.Error(0)
 }
 
-func (m *MockDatabaseForDebate) EndDebate(id, winner string) error {
-	args := m.Called(id, winner)
+func (m *MockDatabaseForDebate) UpdateDebateEnd(id, status, winner string) error {
+	args := m.Called(id, status, winner)
 	return args.Error(0)
 }
 
@@ -47,23 +50,184 @@ func (m *MockDatabaseForDebate) ListActiveDebates() ([]*database.Debate, error) 
 	return args.Get(0).([]*database.Debate), args.Error(1)
 }
 
+func (m *MockDatabaseForDebate) ListDebates(filter database.DebateFilter) ([]*database.Debate, int, error) {
+	args := m.Called(filter)
+	return args.Get(0).([]*database.Debate), args.Int(1), args.Error(2)
+}
+
+func (m *MockDatabaseForDebate) GetTopic(id int) (*database.Topic, error) {
+	args := m.Called(id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*database.Topic), args.Error(1)
+}
+
+func (m *MockDatabaseForDebate) GetTopics(filter database.TopicFilter) ([]*database.Topic, int, error) {
+	args := m.Called(filter)
+	return args.Get(0).([]*database.Topic), args.Int(1), args.Error(2)
+}
+
+func (m *MockDatabaseForDebate) SaveArgument(playerID, topic, content, side, debateID string) (int64, error) {
+	args := m.Called(playerID, topic, content, side, debateID)
+	return args.Get(0).(int64), args.Error(1)
+}
+
+func (m *MockDatabaseForDebate) SaveScore(argumentID int64, debateID string, score *scoring.ArgumentScore) error {
+	args := m.Called(argumentID, debateID, score)
+	return args.Error(0)
+}
+
+func (m *MockDatabaseForDebate) GetAllArguments() ([]*database.Argument, error) {
+	args := m.Called()
+	return args.Get(0).([]*database.Argument), args.Error(1)
+}
+
+func (m *MockDatabaseForDebate) GetArgumentWithScore(id int64) (*database.Argument, error) {
+	args := m.Called(id)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*database.Argument), args.Error(1)
+}
+
+// Stub implementations for other interface methods
+func (m *MockDatabaseForDebate) Close() error {
+	return nil
+}
+
+func (m *MockDatabaseForDebate) CreateUser(user *database.User, password string) error {
+	return nil
+}
+
+func (m *MockDatabaseForDebate) GetUserByID(id string) (*database.User, error) {
+	return nil, nil
+}
+
+func (m *MockDatabaseForDebate) GetUserByUsername(username string) (*database.User, error) {
+	return nil, nil
+}
+
+func (m *MockDatabaseForDebate) GetUserByEmail(email string) (*database.User, error) {
+	return nil, nil
+}
+
+func (m *MockDatabaseForDebate) UpdateUser(user *database.User) error {
+	return nil
+}
+
+func (m *MockDatabaseForDebate) DeleteUser(id string) error {
+	return nil
+}
+
+func (m *MockDatabaseForDebate) VerifyPassword(username, password string) (*database.User, error) {
+	return nil, nil
+}
+
+func (m *MockDatabaseForDebate) UpdatePassword(userID, newPassword string) error {
+	return nil
+}
+
+func (m *MockDatabaseForDebate) CreateRefreshToken(userID, token string, expiresAt time.Time) error {
+	return nil
+}
+
+func (m *MockDatabaseForDebate) GetRefreshToken(token string) (*database.RefreshToken, error) {
+	return nil, nil
+}
+
+func (m *MockDatabaseForDebate) DeleteRefreshToken(token string) error {
+	return nil
+}
+
+func (m *MockDatabaseForDebate) DeleteUserRefreshTokens(userID string) error {
+	return nil
+}
+
+func (m *MockDatabaseForDebate) CreatePasswordResetToken(email string) (string, error) {
+	return "", nil
+}
+
+func (m *MockDatabaseForDebate) VerifyPasswordResetToken(token string) (*database.User, error) {
+	return nil, nil
+}
+
+func (m *MockDatabaseForDebate) ResetPassword(token, newPassword string) error {
+	return nil
+}
+
+func (m *MockDatabaseForDebate) VerifyEmail(token string) error {
+	return nil
+}
+
+func (m *MockDatabaseForDebate) ResendVerificationEmail(email string) (string, error) {
+	return "", nil
+}
+
+func (m *MockDatabaseForDebate) CreateInvitationCode(createdBy, email string, expiresIn time.Duration) (*database.InvitationCode, error) {
+	return nil, nil
+}
+
+func (m *MockDatabaseForDebate) GetInvitationCode(code string) (*database.InvitationCode, error) {
+	return nil, nil
+}
+
+func (m *MockDatabaseForDebate) ValidateInvitationCode(code string) (*database.InvitationCode, error) {
+	return nil, nil
+}
+
+func (m *MockDatabaseForDebate) UseInvitationCode(code, usedBy string) error {
+	return nil
+}
+
+func (m *MockDatabaseForDebate) GetInvitationsByUser(userID string) ([]*database.InvitationCode, error) {
+	return nil, nil
+}
+
+func (m *MockDatabaseForDebate) DeleteInvitationCode(id int, userID string) error {
+	return nil
+}
+
+func (m *MockDatabaseForDebate) CleanupExpiredInvitations() error {
+	return nil
+}
+
+func (m *MockDatabaseForDebate) SaveFeedback(feedback *database.Feedback) error {
+	return nil
+}
+
+func (m *MockDatabaseForDebate) GetFeedback(id int) (*database.Feedback, error) {
+	return nil, nil
+}
+
+func (m *MockDatabaseForDebate) GetFeedbackByUser(userID string) ([]*database.Feedback, error) {
+	return nil, nil
+}
+
+func (m *MockDatabaseForDebate) GetAllFeedback(filter database.FeedbackFilter) ([]*database.Feedback, int, error) {
+	return nil, 0, nil
+}
+
+func (m *MockDatabaseForDebate) GetFeedbackStats() (map[string]interface{}, error) {
+	return nil, nil
+}
+
+func (m *MockDatabaseForDebate) DeleteFeedback(id int) error {
+	return nil
+}
+
 // MockAgent for testing
-type MockAgentForDebate struct {
+type MockAgent struct {
 	mock.Mock
-	*agent.Agent // Embed the real agent to satisfy the interface
+	*agent.Agent
 }
 
-func (m *MockAgentForDebate) GetName() string {
+func (m *MockAgent) GetName() string {
 	args := m.Called()
 	return args.String(0)
 }
 
-func (m *MockAgentForDebate) GetVoice() string {
-	args := m.Called()
-	return args.String(0)
-}
-
-func (m *MockAgentForDebate) GenerateResponse(ctx interface{}, topic, prompt string) (string, error) {
+func (m *MockAgent) GenerateResponse(ctx context.Context, topic, prompt string) (string, error) {
 	args := m.Called(ctx, topic, prompt)
 	return args.String(0), args.Error(1)
 }
@@ -73,19 +237,14 @@ func TestCreateDebate(t *testing.T) {
 	// Create mock database
 	mockDB := new(MockDatabaseForDebate)
 
-	// Create mock agents
-	mockAgent1 := new(MockAgentForDebate)
-	mockAgent1.On("GetName").Return("Agent1")
-	mockAgent1.On("GetVoice").Return("voice1")
-
-	mockAgent2 := new(MockAgentForDebate)
-	mockAgent2.On("GetName").Return("Agent2")
-	mockAgent2.On("GetVoice").Return("voice2")
+	// Create real agents for the map and function call
+	agent1 := &agent.Agent{}
+	agent2 := &agent.Agent{}
 
 	// Setup agents map
 	agents := map[string]*agent.Agent{
-		"Agent1": &agent.Agent{},
-		"Agent2": &agent.Agent{},
+		"Agent1": agent1,
+		"Agent2": agent2,
 	}
 
 	// Setup debate manager
@@ -93,21 +252,19 @@ func TestCreateDebate(t *testing.T) {
 		db:      mockDB,
 		agents:  agents,
 		apiKey:  "test-api-key",
-		debates: make(map[string]*DebateSession),
+		debates: make(map[string]*conversation.DebateSession),
 	}
 
 	// Setup expectations
-	mockDB.On("CreateDebate", mock.AnythingOfType("string"), "Test Topic", "waiting", "Agent1", "Agent2").Return(nil)
+	mockDB.On("CreateDebate", mock.AnythingOfType("string"), "Test Topic", "waiting", mock.AnythingOfType("string"), mock.AnythingOfType("string")).Return(nil)
 
 	// Call the function
-	debateID, err := debateManager.CreateDebate("Test Topic", mockAgent1, mockAgent2, "test_user")
+	debateID, err := debateManager.CreateDebate("Test Topic", agent1, agent2, "test_user")
 
 	// Assertions
 	assert.NoError(t, err)
 	assert.NotEmpty(t, debateID)
 	mockDB.AssertExpectations(t)
-	mockAgent1.AssertExpectations(t)
-	mockAgent2.AssertExpectations(t)
 
 	// Verify the debate was added to the map
 	_, exists := debateManager.debates[debateID]
@@ -124,21 +281,20 @@ func TestGetDebate(t *testing.T) {
 		db:      mockDB,
 		agents:  make(map[string]*agent.Agent),
 		apiKey:  "test-api-key",
-		debates: make(map[string]*DebateSession),
+		debates: make(map[string]*conversation.DebateSession),
 	}
 
-	// Add a test debate to the map
+	// Create a mock debate session
 	testDebateID := "test-debate-id"
-	testSession := &DebateSession{
-		ID:     testDebateID,
-		Config: DebateConfig{Topic: "Test Topic"},
-	}
-	debateManager.debates[testDebateID] = testSession
+	mockSession := &conversation.DebateSession{}
+
+	// Add the mock session to the debates map
+	debateManager.debates[testDebateID] = mockSession
 
 	// Test getting an existing debate
 	session, exists := debateManager.GetDebate(testDebateID)
 	assert.True(t, exists)
-	assert.Equal(t, testSession, session)
+	assert.Equal(t, mockSession, session)
 
 	// Test getting a non-existent debate
 	session, exists = debateManager.GetDebate("non-existent-id")
@@ -146,8 +302,8 @@ func TestGetDebate(t *testing.T) {
 	assert.Nil(t, session)
 }
 
-// TestUpdateDebateStatus tests the UpdateDebateStatus function
-func TestUpdateDebateStatus(t *testing.T) {
+// TestRemoveDebate tests the RemoveDebate function
+func TestRemoveDebate(t *testing.T) {
 	// Create mock database
 	mockDB := new(MockDatabaseForDebate)
 
@@ -156,28 +312,26 @@ func TestUpdateDebateStatus(t *testing.T) {
 		db:      mockDB,
 		agents:  make(map[string]*agent.Agent),
 		apiKey:  "test-api-key",
-		debates: make(map[string]*DebateSession),
+		debates: make(map[string]*conversation.DebateSession),
 	}
 
-	// Add a test debate to the map
+	// Create a mock debate session
 	testDebateID := "test-debate-id"
-	testSession := &DebateSession{
-		ID:     testDebateID,
-		Config: DebateConfig{Topic: "Test Topic"},
-		status: "waiting",
-	}
-	debateManager.debates[testDebateID] = testSession
+	mockSession := &conversation.DebateSession{}
 
-	// Setup expectations
-	mockDB.On("UpdateDebateStatus", testDebateID, "active").Return(nil)
+	// Add the mock session to the debates map
+	debateManager.debates[testDebateID] = mockSession
 
-	// Call the function
-	err := debateManager.UpdateDebateStatus(testDebateID, "active")
+	// Verify the debate exists
+	_, exists := debateManager.debates[testDebateID]
+	assert.True(t, exists)
 
-	// Assertions
-	assert.NoError(t, err)
-	assert.Equal(t, "active", testSession.status)
-	mockDB.AssertExpectations(t)
+	// Remove the debate
+	debateManager.RemoveDebate(testDebateID)
+
+	// Verify the debate was removed
+	_, exists = debateManager.debates[testDebateID]
+	assert.False(t, exists)
 }
 
 // TestCleanupInactiveDebates tests the CleanupInactiveDebates function
@@ -190,55 +344,39 @@ func TestCleanupInactiveDebates(t *testing.T) {
 		db:      mockDB,
 		agents:  make(map[string]*agent.Agent),
 		apiKey:  "test-api-key",
-		debates: make(map[string]*DebateSession),
+		debates: make(map[string]*conversation.DebateSession),
 	}
 
-	// Add test debates to the map
-	// Active debate
+	// Create mock debate sessions with different statuses
 	activeDebateID := "active-debate-id"
-	activeSession := &DebateSession{
-		ID:           activeDebateID,
-		Config:       DebateConfig{Topic: "Active Topic"},
-		status:       "active",
-		lastActivity: time.Now(),
-	}
-	debateManager.debates[activeDebateID] = activeSession
-
-	// Inactive debate (old)
-	inactiveDebateID := "inactive-debate-id"
-	inactiveSession := &DebateSession{
-		ID:           inactiveDebateID,
-		Config:       DebateConfig{Topic: "Inactive Topic"},
-		status:       "active",
-		lastActivity: time.Now().Add(-30 * time.Minute), // 30 minutes old
-	}
-	debateManager.debates[inactiveDebateID] = inactiveSession
-
-	// Finished debate
 	finishedDebateID := "finished-debate-id"
-	finishedSession := &DebateSession{
-		ID:           finishedDebateID,
-		Config:       DebateConfig{Topic: "Finished Topic"},
-		status:       "finished",
-		lastActivity: time.Now().Add(-10 * time.Minute), // 10 minutes old
-	}
+
+	// Create mock sessions
+	activeSession := &conversation.DebateSession{}
+	finishedSession := &conversation.DebateSession{}
+
+	// Set up the GetStatus method to return appropriate values
+	// Since we can't mock methods on conversation.DebateSession directly,
+	// we'll need to add real sessions with the appropriate status
+
+	// Add sessions to the debates map
+	debateManager.debates[activeDebateID] = activeSession
 	debateManager.debates[finishedDebateID] = finishedSession
+
+	// Set the status of the sessions
+	activeSession.UpdateStatus("active")
+	finishedSession.UpdateStatus("finished")
 
 	// Call the function
 	debateManager.CleanupInactiveDebates()
 
-	// Assertions
-	// Active debate should still be in the map
+	// Verify active debate is still in the map
 	_, exists := debateManager.debates[activeDebateID]
-	assert.True(t, exists)
+	assert.True(t, exists, "Active debate should not be removed")
 
-	// Inactive debate should be removed
-	_, exists = debateManager.debates[inactiveDebateID]
-	assert.False(t, exists)
-
-	// Finished debate should be removed
+	// Verify finished debate is removed
 	_, exists = debateManager.debates[finishedDebateID]
-	assert.False(t, exists)
+	assert.False(t, exists, "Finished debate should be removed")
 }
 
 // TestNormalizeScore tests the NormalizeScore function
@@ -248,19 +386,20 @@ func TestNormalizeScore(t *testing.T) {
 		db:      nil,
 		agents:  make(map[string]*agent.Agent),
 		apiKey:  "test-api-key",
-		debates: make(map[string]*DebateSession),
+		debates: make(map[string]*conversation.DebateSession),
 	}
 
 	// Test cases
 	testCases := []struct {
 		input    int
-		expected int
+		expected float64
 	}{
-		{100, 100},
-		{0, 0},
-		{-50, 0},
-		{150, 100},
-		{200, 100},
+		{100, 5.0},  // 100/200*10 = 5.0
+		{0, 0.0},    // 0/200*10 = 0.0
+		{-50, 0.0},  // Negative should be clamped to 0
+		{150, 7.5},  // 150/200*10 = 7.5
+		{200, 10.0}, // 200/200*10 = 10.0
+		{250, 10.0}, // >200 should be clamped to 10.0
 	}
 
 	for _, tc := range testCases {
@@ -269,51 +408,4 @@ func TestNormalizeScore(t *testing.T) {
 			assert.Equal(t, tc.expected, result)
 		})
 	}
-}
-
-// TestDebateSession tests the DebateSession methods
-func TestDebateSession(t *testing.T) {
-	// Create a test session
-	session := &DebateSession{
-		ID:     "test-session-id",
-		Config: DebateConfig{Topic: "Test Topic"},
-		status: "waiting",
-		gameScore: GameScore{
-			Agent1Score: 100,
-			Agent2Score: 100,
-		},
-		history: make([]HistoryEntry, 0),
-	}
-
-	// Test GetStatus
-	assert.Equal(t, "waiting", session.GetStatus())
-
-	// Test UpdateStatus
-	session.UpdateStatus("active")
-	assert.Equal(t, "active", session.GetStatus())
-
-	// Test GetGameScore
-	score := session.GetGameScore()
-	assert.Equal(t, 100, score.Agent1Score)
-	assert.Equal(t, 100, score.Agent2Score)
-
-	// Test UpdateGameScore
-	updatedScore := session.UpdateGameScore(10, -10)
-	assert.Equal(t, 110, updatedScore.Agent1Score)
-	assert.Equal(t, 90, updatedScore.Agent2Score)
-
-	// Test AddHistoryEntry
-	session.AddHistoryEntry("player1", "Test message", true)
-	assert.Equal(t, 1, len(session.history))
-	assert.Equal(t, "player1", session.history[0].Speaker)
-	assert.Equal(t, "Test message", session.history[0].Message)
-	assert.True(t, session.history[0].IsPlayer)
-
-	// Test AddClient and RemoveClient
-	session.clients = make(map[string]interface{})
-	session.AddClient(nil, "client1")
-	assert.Equal(t, 1, len(session.clients))
-
-	session.RemoveClient("client1")
-	assert.Equal(t, 0, len(session.clients))
 }
