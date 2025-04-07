@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Multi-Debate Test Interface</title>
+    <title>ConvinceMe - Debate Test Interface</title>
     <style>
         :root {
             --primary-color: #2196F3;
@@ -144,18 +144,46 @@
             margin-bottom: 5px;
         }
 
+        .topic-item .topic-description {
+            font-size: 0.9em;
+            color: #555;
+            margin: 5px 0 10px 0;
+            line-height: 1.4;
+        }
+
         .topic-item .topic-agents {
             font-size: 0.9em;
             color: #666;
             display: flex;
             justify-content: space-between;
             align-items: center;
+            margin-bottom: 8px;
         }
 
-        .topic-item .topic-agents span:nth-child(2) {
+        .topic-item .agent-info {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            max-width: 45%;
+        }
+
+        .topic-item .agent-name {
+            font-weight: bold;
+            color: var(--secondary-color);
+        }
+
+        .topic-item .agent-role {
+            font-size: 0.85em;
+            color: #666;
+            font-style: italic;
+            margin-top: 2px;
+        }
+
+        .topic-item .vs {
             font-size: 0.8em;
             color: #888;
             margin: 0 5px;
+            align-self: center;
         }
 
         .topic-item .topic-category {
@@ -463,6 +491,13 @@
 
                 <div class="premade-topics">
                     <h3>Pre-made Topics</h3>
+                    <div class="form-group">
+                        <label for="categoryFilter">Filter by Category:</label>
+                        <select id="categoryFilter">
+                            <option value="">All Categories</option>
+                            <!-- Categories will be loaded dynamically -->
+                        </select>
+                    </div>
                     <div id="topicsList" class="topics-list">
                         <div class="loading">Loading topics...</div>
                     </div>
@@ -899,24 +934,44 @@
                 });
         }
 
-        function loadTopics() {
+        function loadTopics(category = '') {
             const topicSelect = document.getElementById('topicSelect');
             const topicsList = document.getElementById('topicsList');
+            const categoryFilter = document.getElementById('categoryFilter');
 
-            fetch('/api/topics')
+            // Show loading state
+            topicsList.innerHTML = '<div class="loading">Loading topics...</div>';
+
+            // Build the URL with optional category filter
+            let url = '/api/topics';
+            if (category) {
+                url = `/api/topics/category/${encodeURIComponent(category)}`;
+            }
+
+            // Add pagination parameters
+            url += '?page=1&limit=100';
+
+            fetch(url)
                 .then(response => response.json())
                 .then(data => {
-                    if (data.topics && data.topics.length > 0) {
+                    if ((data.items && data.items.length > 0) || (data.topics && data.topics.length > 0)) {
+                        // Handle both response formats (items from pagination or direct topics array)
+                        const topicsArray = data.items || data.topics;
                         // Clear existing options in dropdown
                         topicSelect.innerHTML = '<option value="0">Custom Topic</option>';
 
                         // Clear existing topics in list
                         topicsList.innerHTML = '';
 
+                        // Collect all categories for the filter dropdown
+                        const categories = new Set();
+
                         // Group topics by category
                         const topicsByCategory = {};
-                        data.topics.forEach(topic => {
+                        topicsArray.forEach(topic => {
                             const category = topic.category || 'Uncategorized';
+                            categories.add(category);
+
                             if (!topicsByCategory[category]) {
                                 topicsByCategory[category] = [];
                             }
@@ -928,8 +983,27 @@
                             option.textContent = topic.title;
                             option.dataset.agent1 = topic.agent1_name;
                             option.dataset.agent2 = topic.agent2_name;
+                            option.dataset.agent1Role = topic.agent1_role;
+                            option.dataset.agent2Role = topic.agent2_role;
+                            option.dataset.description = topic.description || '';
                             topicSelect.appendChild(option);
                         });
+
+                        // Update category filter dropdown if it's empty
+                        if (categoryFilter.options.length <= 1) {
+                            // Keep the "All Categories" option
+                            const allCategoriesOption = categoryFilter.options[0];
+                            categoryFilter.innerHTML = '';
+                            categoryFilter.appendChild(allCategoriesOption);
+
+                            // Add all categories from the topics
+                            Array.from(categories).sort().forEach(cat => {
+                                const option = document.createElement('option');
+                                option.value = cat;
+                                option.textContent = cat;
+                                categoryFilter.appendChild(option);
+                            });
+                        }
 
                         // Add topics to list by category
                         Object.keys(topicsByCategory).sort().forEach(category => {
@@ -945,12 +1019,20 @@
                                 topicItem.className = 'topic-item';
                                 topicItem.dataset.id = topic.id;
 
+                                // Create a more detailed topic item
                                 topicItem.innerHTML = `
                                     <div class="topic-title">${topic.title}</div>
+                                    ${topic.description ? `<div class="topic-description">${topic.description}</div>` : ''}
                                     <div class="topic-agents">
-                                        <span>${topic.agent1_name}</span>
-                                        <span>vs</span>
-                                        <span>${topic.agent2_name}</span>
+                                        <div class="agent-info">
+                                            <span class="agent-name">${topic.agent1_name}</span>
+                                            <span class="agent-role">${topic.agent1_role}</span>
+                                        </div>
+                                        <span class="vs">vs</span>
+                                        <div class="agent-info">
+                                            <span class="agent-name">${topic.agent2_name}</span>
+                                            <span class="agent-role">${topic.agent2_role}</span>
+                                        </div>
                                     </div>
                                     <div class="topic-category">${category}</div>
                                 `;
@@ -1004,10 +1086,15 @@
                                 // Disable agent selection
                                 agent1Select.disabled = true;
                                 agent2Select.disabled = true;
+
+                                // Update the custom topic field with the selected topic title
+                                document.getElementById('topic').value = selectedOption.textContent;
+                                document.getElementById('topic').disabled = true;
                             } else {
                                 // Custom topic, enable agent selection
                                 document.getElementById('agent1').disabled = false;
                                 document.getElementById('agent2').disabled = false;
+                                document.getElementById('topic').disabled = false;
                             }
                         });
                     } else {
@@ -1029,8 +1116,18 @@
             const agent1 = document.getElementById('agent1').value;
             const agent2 = document.getElementById('agent2').value;
 
+            // Prepare request data
+            const data = {};
+
             // Check if using custom topic or pre-generated topic
-            if (topicId === 0) {
+            if (topicId > 0) {
+                // Using pre-generated topic
+                data.topic_id = topicId;
+
+                // If using pre-generated topic, show the selected topic title
+                const selectedOption = topicSelect.options[topicSelect.selectedIndex];
+                log(`Creating debate with pre-generated topic: ${selectedOption.textContent}`, 'info');
+            } else {
                 // Using custom topic
                 if (!topic) {
                     log('Please enter a debate topic', 'error');
@@ -1046,24 +1143,19 @@
                     log('Please select different agents', 'error');
                     return;
                 }
+
+                // Set custom topic data
+                data.topic = topic;
+                data.agent1 = agent1;
+                data.agent2 = agent2;
+
+                log(`Creating custom debate: ${topic} (${agent1} vs ${agent2})`, 'info');
             }
 
-            const data = {
-                topic: topic,
-                agent1: agent1,
-                agent2: agent2,
-                created_by: playerId,
-                topic_id: topicId
-            };
+            // Add player ID to track who created the debate
+            data.created_by = playerId;
 
-            if (topicId > 0) {
-                // If using pre-generated topic, show the selected topic title
-                const selectedOption = topicSelect.options[topicSelect.selectedIndex];
-                log(`Creating debate with pre-generated topic: ${selectedOption.textContent}`, 'info');
-            } else {
-                log(`Creating debate: ${topic} (${agent1} vs ${agent2})`, 'info');
-            }
-
+            // Send the request to create the debate
             fetch('/api/debates', {
                 method: 'POST',
                 headers: {
@@ -1071,19 +1163,33 @@
                 },
                 body: JSON.stringify(data)
             })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.error) {
-                        throw new Error(data.error);
-                    }
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(data => {
+                        throw new Error(data.error || 'Failed to create debate');
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                log(`Debate created successfully: ${data.debate.id}`, 'success');
 
-                    log(`Debate created successfully: ${data.debate.id}`, 'success');
-                    loadDebates();
-                    joinDebate(data.debate.id);
-                })
-                .catch(error => {
-                    log(`Error creating debate: ${error}`, 'error');
-                });
+                // Reset form for next use
+                if (topicId > 0) {
+                    // Reset topic selection
+                    topicSelect.value = 0;
+                    document.getElementById('topic').disabled = false;
+                    document.getElementById('agent1').disabled = false;
+                    document.getElementById('agent2').disabled = false;
+                }
+
+                // Refresh debates list and join the new debate
+                loadDebates();
+                joinDebate(data.debate.id);
+            })
+            .catch(error => {
+                log(`Error creating debate: ${error}`, 'error');
+            });
         }
 
         function joinDebate(debateId) {
@@ -1157,6 +1263,12 @@
             document.getElementById('refreshDebatesBtn').addEventListener('click', loadDebates);
             document.getElementById('sendBtn').addEventListener('click', sendMessage);
             document.getElementById('leaveBtn').addEventListener('click', leaveDebate);
+
+            // Category filter change event
+            document.getElementById('categoryFilter').addEventListener('change', function() {
+                const category = this.value;
+                loadTopics(category);
+            });
 
             // Message input enter key
             document.getElementById('message').addEventListener('keypress', function(e) {
