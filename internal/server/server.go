@@ -221,9 +221,9 @@ func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey str
 func (s *Server) createDebateHandler(c *gin.Context) {
 	// Extract request data
 	var req struct {
-		Topic     string `json:"topic" binding:"required"`
-		Agent1    string `json:"agent1" binding:"required"`
-		Agent2    string `json:"agent2" binding:"required"`
+		Topic     string `json:"topic"`
+		Agent1    string `json:"agent1"`
+		Agent2    string `json:"agent2"`
 		CreatedBy string `json:"created_by"`
 		TopicID   int    `json:"topic_id"` // Optional: Use a pre-generated topic
 	}
