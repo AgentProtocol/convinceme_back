@@ -1,17 +1,16 @@
 package main
 
 import (
-	"context"
 	"log"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/joho/godotenv"
 	"github.com/neo/convinceme_backend/internal/agent"
-	"github.com/neo/convinceme_backend/internal/conversation"
+	"github.com/neo/convinceme_backend/internal/conversation" // Keep this for DebateConfig/NewDebateSession
 	"github.com/neo/convinceme_backend/internal/database"
-	"github.com/neo/convinceme_backend/internal/player"
+
+	// "github.com/neo/convinceme_backend/internal/player" // Removed unused import
 	"github.com/neo/convinceme_backend/internal/server"
 	"github.com/neo/convinceme_backend/internal/types"
 )
@@ -79,37 +78,62 @@ func main() {
 		logger.Fatalf("Failed to create agent2: %v", err)
 	}
 
-	// Create input handler
-	inputHandler := player.NewInputHandler(logger)
+	// Create input handler (Removed as it's unused)
+	// inputHandler := player.NewInputHandler(logger)
 
 	// Define the debate topic with explicit initial context
 	commonTopic := "Are memecoins net negative or positive for the crypto space?"
 
-	// Create conversation configuration
-	convConfig := conversation.ConversationConfig{
-		Topic:               commonTopic,
-		MaxTurns:            10,
-		TurnDelay:           500 * time.Millisecond,
-		ResponseStyle:       types.ResponseStyleDebate, // Changed to debate style
-		MaxCompletionTokens: 150,                       // Increased tokens for more detailed responses
-		TemperatureHigh:     true,
+	// Create debate configuration using the renamed struct and DefaultConfig
+	debateConfig := conversation.DefaultConfig() // Use the new default
+	debateConfig.Topic = commonTopic             // Override topic if needed
+	debateConfig.ResponseStyle = types.ResponseStyleDebate
+	debateConfig.MaxCompletionTokens = 150
+	// Adjust other fields from DefaultConfig if necessary
+	// convConfig := conversation.DebateConfig{ // Old manual config
+	// 	Topic:               commonTopic,
+	// 	MaxTurns:            10,
+	// 	TurnDelay:           500 * time.Millisecond,
+	// }
+
+	// Create a new debate session (placeholder - this logic will move to manager)
+	// Note: inputHandler is currently unused in server.go and might be removed entirely
+	// For now, passing nil or the existing handler. The DebateSession constructor doesn't take it.
+	// Using a placeholder ID "main_debate"
+	_, err = conversation.NewDebateSession("main_debate", agent1, agent2, debateConfig, openAIKey)
+	if err != nil {
+		logger.Fatalf("Failed to create main debate session: %v", err)
 	}
+	// conv := conversation.NewDebateSession(agent1, agent2, debateConfig, openAIKey) // Old call
 
-	// Create a new conversation with the common topic
-	conv := conversation.NewConversation(agent1, agent2, convConfig, inputHandler, openAIKey)
-
-	// Create agents map
+	// Create agents map (remains the same)
 	agents := map[string]*agent.Agent{
 		agent1Config.Name: agent1,
 		agent2Config.Name: agent2,
 	}
 
+	// Get JWT secret from environment variables
+	jwtSecret := os.Getenv("JWT_SECRET")
+	if jwtSecret == "" {
+		jwtSecret = "default_secret_key_for_development" // Default for development
+		logger.Printf("WARNING: JWT_SECRET not set, using default value for development")
+	}
+
+	// Check if email verification is required
+	requireEmailVerification := os.Getenv("REQUIRE_EMAIL_VERIFICATION") == "true"
+
+	// Check if invitation codes are required for registration
+	requireInvitation := os.Getenv("REQUIRE_INVITATION") == "true"
+
 	// Update server config to include both API keys
 	serverConfig := &server.Config{
-		Port:          "0.0.0.0:8080",
-		OpenAIKey:     openAIKey,
-		ElevenLabsKey: elevenLabsKey, // Use ElevenLabs key
-		ResponseDelay: 500,
+		Port:                     "0.0.0.0:8080",
+		OpenAIKey:                openAIKey,
+		ElevenLabsKey:            elevenLabsKey, // Use ElevenLabs key
+		ResponseDelay:            500,
+		JWTSecret:                jwtSecret,
+		RequireEmailVerification: requireEmailVerification,
+		RequireInvitation:        requireInvitation,
 	}
 
 	// Create and start the server
@@ -119,8 +143,8 @@ func main() {
 		logger.Fatalf("Server failed: %v", err)
 	}
 
-	// Start the conversation
-	if err := conv.Start(context.Background()); err != nil {
-		logger.Fatalf("Failed to start conversation: %v", err)
-	}
+	// Start the conversation (This logic is removed as the server/manager will handle starting sessions)
+	// if err := conv.Start(context.Background()); err != nil {
+	// 	logger.Fatalf("Failed to start conversation: %v", err)
+	// }
 }

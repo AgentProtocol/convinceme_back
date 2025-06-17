@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debate Room</title>
+    <link rel="stylesheet" href="static/styles.css">
+    <style>
+        .debate-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        
+        .debate-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        .debate-info {
+            flex: 1;
+        }
+        
+        .debate-title {
+            font-size: 1.5em;
+            margin-bottom: 5px;
+        }
+        
+        .debate-status {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        
+        .status-waiting {
+            background-color: #ffeb3b;
+            color: #333;
+        }
+        
+        .status-active {
+            background-color: #4caf50;
+            color: white;
+        }
+        
+        .status-finished {
+            background-color: #9e9e9e;
+            color: white;
+        }
+        
+        .debate-actions {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .action-btn {
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            border: none;
+            background-color: #f5f5f5;
+            transition: background-color 0.2s;
+        }
+        
+        .action-btn:hover {
+            background-color: #e0e0e0;
+        }
+        
+        .leave-btn {
+            background-color: #f44336;
+            color: white;
+        }
+        
+        .leave-btn:hover {
+            background-color: #d32f2f;
+        }
+        
+        .debate-content {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+        
+        .agents-score {
+            width: 200px;
+            padding: 20px;
+            background-color: #f5f5f5;
+            border-radius: 8px;
+            margin-right: 20px;
+        }
+        
+        .score-card {
+            padding: 15px;
+            background-color: white;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        
+        .agent-name {
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        
+        .score-bar {
+            height: 20px;
+            background-color: #e0e0e0;
+            border-radius: 10px;
+            margin-top: 5px;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .score-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #4CAF50, #8BC34A);
+            border-radius: 10px;
+            transition: width 0.5s;
+        }
+        
+        .messages-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+        
+        .messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            background-color: white;
+        }
+        
+        .message {
+            margin-bottom: 20px;
+            max-width: 80%;
+        }
+        
+        .message.agent-message {
+            margin-right: auto;
+        }
+        
+        .message.player-message {
+            margin-left: auto;
+            background-color: #2196f3;
+            color: white;
+            border-radius: 18px 18px 0 18px;
+            padding: 10px 15px;
+        }
+        
+        .message-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+        
+        .message-speaker {
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        
+        .message-time {
+            font-size: 0.8em;
+            color: #666;
+        }
+        
+        .message-content {
+            background-color: #f5f5f5;
+            padding: 10px 15px;
+            border-radius: 0 18px 18px 18px;
+        }
+        
+        .message-scores {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: rgba(0, 0, 0, 0.05);
+            border-radius: 8px;
+            font-size: 0.9em;
+        }
+        
+        .system-message {
+            text-align: center;
+            margin: 10px 0;
+            font-style: italic;
+            color: #666;
+        }
+        
+        .input-container {
+            display: flex;
+            padding: 10px;
+            background-color: #f5f5f5;
+        }
+        
+        .message-input {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px 0 0 4px;
+            font-size: 1em;
+        }
+        
+        .send-btn {
+            padding: 10px 20px;
+            background-color: #2196f3;
+            color: white;
+            border: none;
+            border-radius: 0 4px 4px 0;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        .send-btn:hover {
+            background-color: #0b7dda;
+        }
+        
+        .send-btn:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .connection-status {
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            margin-left: 10px;
+        }
+        
+        .connected {
+            background-color: #4caf50;
+            color: white;
+        }
+        
+        .disconnected {
+            background-color: #f44336;
+            color: white;
+        }
+        
+        .connecting {
+            background-color: #ff9800;
+            color: white;
+        }
+        
+        .game-over {
+            text-align: center;
+            padding: 20px;
+            margin: 20px 0;
+            background-color: #f5f5f5;
+            border-radius: 8px;
+            font-size: 1.2em;
+            font-weight: bold;
+        }
+        
+        .winner {
+            color: #4caf50;
+        }
+    </style>
+</head>
+<body>
+    <div class="debate-container">
+        <div class="debate-header">
+            <div class="debate-info">
+                <h1 class="debate-title" id="debateTopic">Loading debate...</h1>
+                <div>
+                    <span class="debate-status connecting" id="debateStatus">Connecting</span>
+                    <span class="connection-status connecting" id="connectionStatus">Connecting</span>
+                </div>
+            </div>
+            <div class="debate-actions">
+                <button class="action-btn" id="refreshBtn">Refresh</button>
+                <button class="action-btn leave-btn" id="leaveBtn">Leave Debate</button>
+            </div>
+        </div>
+        
+        <div class="debate-content">
+            <div class="agents-score">
+                <div class="score-card" id="agent1Card">
+                    <div class="agent-name" id="agent1Name">Agent 1</div>
+                    <div class="score-value" id="agent1ScoreValue">Score: 5.0</div>
+                    <div class="score-bar">
+                        <div class="score-fill" id="agent1ScoreFill" style="width: 50%"></div>
+                    </div>
+                </div>
+                
+                <div class="score-card" id="agent2Card">
+                    <div class="agent-name" id="agent2Name">Agent 2</div>
+                    <div class="score-value" id="agent2ScoreValue">Score: 5.0</div>
+                    <div class="score-bar">
+                        <div class="score-fill" id="agent2ScoreFill" style="width: 50%"></div>
+                    </div>
+                </div>
+                
+                <div id="playerCount">Players: 1</div>
+            </div>
+            
+            <div class="messages-container">
+                <div class="messages" id="messagesContainer">
+                    <div class="system-message">Connecting to debate...</div>
+                </div>
+                
+                <div class="input-container">
+                    <input type="text" class="message-input" id="messageInput" placeholder="Type your argument..." disabled>
+                    <button class="send-btn" id="sendBtn" disabled>Send</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Get parameters from URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const debateId = urlParams.get('id');
+        const playerId = urlParams.get('player') || localStorage.getItem('playerId') || 'anonymous';
+        
+        // Store player ID for future use
+        localStorage.setItem('playerId', playerId);
+        
+        // Variables
+        let ws = null;
+        let debateInfo = null;
+        let isConnected = false;
+        
+        // DOM elements
+        const messagesContainer = document.getElementById('messagesContainer');
+        const messageInput = document.getElementById('messageInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const connectionStatus = document.getElementById('connectionStatus');
+        const debateStatus = document.getElementById('debateStatus');
+        const debateTopic = document.getElementById('debateTopic');
+        const refreshBtn = document.getElementById('refreshBtn');
+        const leaveBtn = document.getElementById('leaveBtn');
+        const agent1Name = document.getElementById('agent1Name');
+        const agent2Name = document.getElementById('agent2Name');
+        const agent1ScoreValue = document.getElementById('agent1ScoreValue');
+        const agent2ScoreValue = document.getElementById('agent2ScoreValue');
+        const agent1ScoreFill = document.getElementById('agent1ScoreFill');
+        const agent2ScoreFill = document.getElementById('agent2ScoreFill');
+        const playerCount = document.getElementById('playerCount');
+        
+        // Initialize
+        async function initialize() {
+            if (!debateId) {
+                alert('No debate ID provided');
+                window.location.href = '/lobby.html';
+                return;
+            }
+            
+            // Load debate info
+            try {
+                const response = await fetch(`/api/debates/${debateId}`);
+                
+                if (!response.ok) {
+                    throw new Error('Debate not found');
+                }
+                
+                const data = await response.json();
+                debateInfo = data.debate;
+                
+                // Update UI with debate info
+                updateDebateInfo();
+                
+                // Connect to WebSocket
+                connectWebSocket();
+            } catch (error) {
+                console.error('Error loading debate:', error);
+                addSystemMessage(`Error: ${error.message}`);
+                updateConnectionStatus('disconnected');
+            }
+        }
+        
+        // Update debate info in UI
+        function updateDebateInfo() {
+            if (!debateInfo) return;
+            
+            debateTopic.textContent = debateInfo.topic;
+            updateDebateStatus(debateInfo.status);
+            
+            agent1Name.textContent = debateInfo.agent1_name;
+            agent2Name.textContent = debateInfo.agent2_name;
+            
+            // If real-time info is available
+            if (debateInfo.real_time) {
+                updateScores(debateInfo.real_time.game_score);
+                playerCount.textContent = `Players: ${debateInfo.real_time.client_count}`;
+            }
+        }
+        
+        // Update debate status
+        function updateDebateStatus(status) {
+            debateStatus.textContent = status;
+            debateStatus.className = `debate-status status-${status.toLowerCase()}`;
+            
+            // Enable/disable input based on status
+            const isActive = status.toLowerCase() === 'active';
+            messageInput.disabled = !isActive || !isConnected;
+            sendBtn.disabled = !isActive || !isConnected;
+            
+            if (status.toLowerCase() === 'finished') {
+                addSystemMessage('This debate has ended.');
+            }
+        }
+        
+        // Update connection status
+        function updateConnectionStatus(status) {
+            connectionStatus.textContent = status === 'connected' ? 'Connected' : status === 'connecting' ? 'Connecting...' : 'Disconnected';
+            connectionStatus.className = `connection-status ${status}`;
+            
+            isConnected = status === 'connected';
+            
+            // Enable/disable input based on connection
+            const isActive = debateInfo && debateInfo.status.toLowerCase() === 'active';
+            messageInput.disabled = !isActive || !isConnected;
+            sendBtn.disabled = !isActive || !isConnected;
+        }
+        
+        // Connect to WebSocket
+        function connectWebSocket() {
+            if (ws) {
+                ws.close();
+            }
+            
+            updateConnectionStatus('connecting');
+            
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/debate/${debateId}`;
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = function() {
+                updateConnectionStatus('connected');
+                addSystemMessage('Connected to debate');
+            };
+            
+            ws.onclose = function() {
+                updateConnectionStatus('disconnected');
+                addSystemMessage('Disconnected from debate');
+                
+                // Attempt to reconnect after 5 seconds
+                setTimeout(connectWebSocket, 5000);
+            };
+            
+            ws.onerror = function(error) {
+                console.error('WebSocket error:', error);
+                updateConnectionStatus('disconnected');
+                addSystemMessage('Connection error');
+            };
+            
+            ws.onmessage = function(event) {
+                handleWebSocketMessage(event.data);
+            };
+        }
+        
+        // Handle WebSocket message
+        function handleWebSocketMessage(data) {
+            try {
+                const message = JSON.parse(data);
+                
+                switch (message.type) {
+                    case 'message':
+                        addMessage(message);
+                        break;
+                    
+                    case 'system':
+                        addSystemMessage(message.message);
+                        break;
+                    
+                    case 'game_score':
+                        updateScores(message.gameScore);
+                        break;
+                    
+                    case 'game_over':
+                        handleGameOver(message);
+                        break;
+                    
+                    case 'error':
+                        addSystemMessage(`Error: ${message.message}`);
+                        break;
+                        
+                    default:
+                        console.log('Unknown message type:', message.type, message);
+                }
+            } catch (error) {
+                console.error('Error handling message:', error, data);
+            }
+        }
+        
+        // Add message to UI
+        function addMessage(message) {
+            const messageElement = document.createElement('div');
+            messageElement.className = `message ${message.isPlayer ? 'player-message' : 'agent-message'}`;
+            
+            const isCurrentPlayer = message.agent === playerId;
+            
+            if (!message.isPlayer) {
+                // Agent message
+                const headerElement = document.createElement('div');
+                headerElement.className = 'message-header';
+                
+                const speakerElement = document.createElement('div');
+                speakerElement.className = 'message-speaker';
+                speakerElement.textContent = message.agent;
+                
+                const timeElement = document.createElement('div');
+                timeElement.className = 'message-time';
+                timeElement.textContent = new Date().toLocaleTimeString();
+                
+                headerElement.appendChild(speakerElement);
+                headerElement.appendChild(timeElement);
+                messageElement.appendChild(headerElement);
+                
+                const contentElement = document.createElement('div');
+                contentElement.className = 'message-content';
+                contentElement.textContent = message.message;
+                messageElement.appendChild(contentElement);
+                
+                // Add scores if available
+                if (message.scores && message.scores.argument) {
+                    const scoresElement = document.createElement('div');
+                    scoresElement.className = 'message-scores';
+                    
+                    const score = message.scores.argument;
+                    scoresElement.innerHTML = `
+                        <div><strong>Overall:</strong> ${score.average.toFixed(1)}</div>
+                        <div><strong>Strength:</strong> ${score.strength} | <strong>Relevance:</strong> ${score.relevance} | <strong>Logic:</strong> ${score.logic}</div>
+                        <div><strong>Truth:</strong> ${score.truth} | <strong>Humor:</strong> ${score.humor}</div>
+                    `;
+                    
+                    messageElement.appendChild(scoresElement);
+                }
+            } else {
+                // Player message
+                messageElement.textContent = isCurrentPlayer ? message.message : `${message.agent}: ${message.message}`;
+            }
+            
+            messagesContainer.appendChild(messageElement);
+            scrollToBottom();
+        }
+        
+        // Add system message
+        function addSystemMessage(text) {
+            const messageElement = document.createElement('div');
+            messageElement.className = 'system-message';
+            messageElement.textContent = text;
+            messagesContainer.appendChild(messageElement);
+            scrollToBottom();
+        }
+        
+        // Update scores
+        function updateScores(scores) {
+            if (!debateInfo) return;
+            
+            const agent1Score = scores[debateInfo.agent1_name] || 5.0;
+            const agent2Score = scores[debateInfo.agent2_name] || 5.0;
+            
+            agent1ScoreValue.textContent = `Score: ${agent1Score.toFixed(1)}`;
+            agent2ScoreValue.textContent = `Score: ${agent2Score.toFixed(1)}`;
+            
+            agent1ScoreFill.style.width = `${agent1Score * 10}%`;
+            agent2ScoreFill.style.width = `${agent2Score * 10}%`;
+        }
+        
+        // Handle game over
+        function handleGameOver(message) {
+            const gameOverElement = document.createElement('div');
+            gameOverElement.className = 'game-over';
+            
+            if (message.winner) {
+                gameOverElement.innerHTML = `Game Over! <span class="winner">${message.winner}</span> has won the debate!`;
+            } else {
+                gameOverElement.textContent = 'Game Over! The debate has ended in a draw.';
+            }
+            
+            messagesContainer.appendChild(gameOverElement);
+            scrollToBottom();
+            
+            // Update debate status
+            updateDebateStatus('finished');
+            
+            // Refresh debate info
+            fetchDebateInfo();
+        }
+        
+        // Send message
+        function sendMessage() {
+            if (!isConnected || !ws) return;
+            
+            const message = messageInput.value.trim();
+            if (!message) return;
+            
+            const messageObj = {
+                type: 'text',
+                message: message,
+                player_id: playerId,
+                topic: debateInfo.topic
+            };
+            
+            ws.send(JSON.stringify(messageObj));
+            messageInput.value = '';
+        }
+        
+        // Fetch debate info
+        async function fetchDebateInfo() {
+            try {
+                const response = await fetch(`/api/debates/${debateId}`);
+                
+                if (!response.ok) {
+                    throw new Error('Debate not found');
+                }
+                
+                const data = await response.json();
+                debateInfo = data.debate;
+                
+                // Update UI with debate info
+                updateDebateInfo();
+            } catch (error) {
+                console.error('Error refreshing debate:', error);
+            }
+        }
+        
+        // Scroll to bottom of messages
+        function scrollToBottom() {
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+        
+        // Event listeners
+        messageInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+        
+        sendBtn.addEventListener('click', sendMessage);
+        
+        refreshBtn.addEventListener('click', fetchDebateInfo);
+        
+        leaveBtn.addEventListener('click', function() {
+            if (ws) {
+                ws.close();
+            }
+            window.location.href = '/lobby.html';
+        });
+        
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', initialize);
+    </script>
+</body>
+</html>

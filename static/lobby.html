@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debate Lobby</title>
+    <link rel="stylesheet" href="static/styles.css">
+    <style>
+        .lobby-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .debate-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .debate-card {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            background-color: #fff;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s;
+        }
+        
+        .debate-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+        }
+        
+        .debate-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .debate-status {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            font-weight: bold;
+        }
+        
+        .status-waiting {
+            background-color: #ffeb3b;
+            color: #333;
+        }
+        
+        .status-active {
+            background-color: #4caf50;
+            color: white;
+        }
+        
+        .status-finished {
+            background-color: #9e9e9e;
+            color: white;
+        }
+        
+        .debate-topic {
+            font-weight: bold;
+            font-size: 1.2em;
+            margin-bottom: 10px;
+        }
+        
+        .debate-agents {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 15px;
+        }
+        
+        .agent {
+            text-align: center;
+            flex: 1;
+        }
+        
+        .agent-name {
+            font-weight: bold;
+        }
+        
+        .vs {
+            margin: 0 10px;
+            align-self: center;
+            font-weight: bold;
+            color: #ff5722;
+        }
+        
+        .debate-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 15px;
+        }
+        
+        .debate-time {
+            font-size: 0.8em;
+            color: #666;
+        }
+        
+        .join-btn {
+            background-color: #2196f3;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        .join-btn:hover {
+            background-color: #0b7dda;
+        }
+        
+        .join-btn:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .create-debate-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background-color: #f5f5f5;
+            border-radius: 8px;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        
+        .form-control {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 1em;
+        }
+        
+        .create-btn {
+            background-color: #ff5722;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1em;
+            transition: background-color 0.2s;
+        }
+        
+        .create-btn:hover {
+            background-color: #e64a19;
+        }
+        
+        .section-header {
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #ddd;
+        }
+    </style>
+</head>
+<body>
+    <div class="lobby-container">
+        <h1>Debate Lobby</h1>
+        
+        <div class="create-debate-section">
+            <div class="section-header">
+                <h2>Create New Debate</h2>
+            </div>
+            
+            <form id="createDebateForm">
+                <div class="form-group">
+                    <label for="topic">Topic</label>
+                    <input type="text" id="topic" class="form-control" placeholder="Enter debate topic" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="agent1">First Agent</label>
+                    <select id="agent1" class="form-control" required>
+                        <!-- Will be populated from API -->
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="agent2">Second Agent</label>
+                    <select id="agent2" class="form-control" required>
+                        <!-- Will be populated from API -->
+                    </select>
+                </div>
+                
+                <button type="submit" class="create-btn">Create Debate</button>
+            </form>
+        </div>
+        
+        <div class="active-debates-section">
+            <div class="section-header">
+                <h2>Active Debates</h2>
+                <button id="refreshBtn" class="join-btn">Refresh</button>
+            </div>
+            
+            <div id="debateGrid" class="debate-grid">
+                <!-- Debates will be populated here -->
+                <div class="loading">Loading debates...</div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Player ID generation/storage
+        let playerId = localStorage.getItem('playerId');
+        if (!playerId) {
+            playerId = 'player_' + Math.random().toString(36).substring(2, 10);
+            localStorage.setItem('playerId', playerId);
+        }
+        
+        // Load agents for dropdowns
+        async function loadAgents() {
+            try {
+                const response = await fetch('/api/agents');
+                const data = await response.json();
+                
+                const agent1Select = document.getElementById('agent1');
+                const agent2Select = document.getElementById('agent2');
+                
+                // Clear existing options
+                agent1Select.innerHTML = '';
+                agent2Select.innerHTML = '';
+                
+                // Add agents to dropdowns
+                data.agents.forEach(agent => {
+                    const option1 = document.createElement('option');
+                    option1.value = agent.name;
+                    option1.textContent = agent.name;
+                    agent1Select.appendChild(option1);
+                    
+                    const option2 = document.createElement('option');
+                    option2.value = agent.name;
+                    option2.textContent = agent.name;
+                    agent2Select.appendChild(option2);
+                });
+                
+                // Set default selections to different agents if possible
+                if (data.agents.length >= 2) {
+                    agent1Select.selectedIndex = 0;
+                    agent2Select.selectedIndex = 1;
+                }
+            } catch (error) {
+                console.error('Error loading agents:', error);
+            }
+        }
+        
+        // Load debates
+        async function loadDebates() {
+            try {
+                const debateGrid = document.getElementById('debateGrid');
+                debateGrid.innerHTML = '<div class="loading">Loading debates...</div>';
+                
+                const response = await fetch('/api/debates?status=active');
+                const data = await response.json();
+                
+                debateGrid.innerHTML = '';
+                
+                if (data.debates.length === 0) {
+                    debateGrid.innerHTML = '<div class="no-debates">No active debates. Create one to get started!</div>';
+                    return;
+                }
+                
+                data.debates.forEach(debate => {
+                    const card = document.createElement('div');
+                    card.className = 'debate-card';
+                    
+                    const statusClass = `status-${debate.status.toLowerCase()}`;
+                    
+                    card.innerHTML = `
+                        <div class="debate-header">
+                            <span class="debate-status ${statusClass}">${debate.status}</span>
+                            <span class="debate-time">${formatTime(debate.created_at)}</span>
+                        </div>
+                        <div class="debate-topic">${debate.topic}</div>
+                        <div class="debate-agents">
+                            <div class="agent">
+                                <div class="agent-name">${debate.agent1_name}</div>
+                            </div>
+                            <div class="vs">VS</div>
+                            <div class="agent">
+                                <div class="agent-name">${debate.agent2_name}</div>
+                            </div>
+                        </div>
+                        <div class="debate-footer">
+                            <span class="debate-id">ID: ${debate.id.substring(0, 8)}...</span>
+                            <button class="join-btn" data-id="${debate.id}" ${debate.status !== 'active' && debate.status !== 'waiting' ? 'disabled' : ''}>
+                                ${debate.status === 'waiting' ? 'Start' : 'Join'}
+                            </button>
+                        </div>
+                    `;
+                    
+                    debateGrid.appendChild(card);
+                    
+                    // Add click event to join button
+                    const joinBtn = card.querySelector('.join-btn');
+                    joinBtn.addEventListener('click', () => {
+                        joinDebate(debate.id);
+                    });
+                });
+            } catch (error) {
+                console.error('Error loading debates:', error);
+                const debateGrid = document.getElementById('debateGrid');
+                debateGrid.innerHTML = '<div class="error">Error loading debates. Please try again.</div>';
+            }
+        }
+        
+        // Format time for display
+        function formatTime(timeString) {
+            const date = new Date(timeString);
+            return date.toLocaleString();
+        }
+        
+        // Join debate
+        function joinDebate(debateId) {
+            window.location.href = `/debate.html?id=${debateId}&player=${playerId}`;
+        }
+        
+        // Create debate
+        async function createDebate(event) {
+            event.preventDefault();
+            
+            const topic = document.getElementById('topic').value;
+            const agent1 = document.getElementById('agent1').value;
+            const agent2 = document.getElementById('agent2').value;
+            
+            if (agent1 === agent2) {
+                alert('Please select different agents');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/debates', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        topic,
+                        agent1,
+                        agent2,
+                        created_by: playerId
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok) {
+                    // Join the newly created debate
+                    joinDebate(data.debate.id);
+                } else {
+                    alert(`Error creating debate: ${data.error}`);
+                }
+            } catch (error) {
+                console.error('Error creating debate:', error);
+                alert('Error creating debate. Please try again.');
+            }
+        }
+        
+        // Initialize page
+        document.addEventListener('DOMContentLoaded', () => {
+            loadAgents();
+            loadDebates();
+            
+            // Set up event listeners
+            document.getElementById('createDebateForm').addEventListener('submit', createDebate);
+            document.getElementById('refreshBtn').addEventListener('click', loadDebates);
+            
+            // Auto-refresh debates every 30 seconds
+            setInterval(loadDebates, 30000);
+        });
+    </script>
+</body>
+</html>

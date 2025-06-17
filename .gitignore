@@ -1,6 +1,14 @@
+# Environment variables and secrets
 .env
-/static/hls/*
+.env.*
+!.env.example
+
+# Application data and media files
 /data/*
+!/data/.gitkeep
+/static/hls/*
+!/static/hls/.gitkeep
+/config/*.json
 
 # SSL/TLS certificates and keys
 *.pem
@@ -14,6 +22,42 @@
 /ssl/
 /certs/
 
-# macOS system files
+# Compiled binaries and build artifacts
+/bin/
+/build/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go specific
+*.test
+*.out
+go.work
+
+# Dependency directories
+/vendor/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS specific files
 .DS_Store
 **/.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+/tmp/
+*.tmp
+
+# Debug files
+__debug_bin*

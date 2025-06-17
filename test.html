@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Agent Chat Interface</title>
+    <title>ConvinceMe - Debate Test Interface</title>
     <style>
         :root {
             --primary-color: #2196F3;
@@ -12,6 +12,9 @@
             --background-color: #f5f5f5;
             --text-color: #333;
             --border-color: #ddd;
+            --success-color: #4caf50;
+            --warning-color: #ff9800;
+            --error-color: #f44336;
         }
 
         body {
@@ -24,9 +27,15 @@
 
         .container {
             display: flex;
+            flex-direction: column;
             gap: 20px;
             max-width: 1200px;
             margin: 0 auto;
+        }
+
+        .main-content {
+            display: flex;
+            gap: 20px;
         }
 
         .chat-section {
@@ -47,6 +56,246 @@
             display: flex;
             flex-direction: column;
             height: 80vh;
+        }
+
+        .lobby-section {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .debate-controls {
+            display: flex;
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .create-debate, .active-debates {
+            flex: 1;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+        }
+
+        .action-btn {
+            padding: 8px 16px;
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .action-btn:hover {
+            background-color: var(--secondary-color);
+        }
+
+        .create-btn {
+            background-color: var(--success-color);
+        }
+
+        .create-btn:hover {
+            background-color: #388e3c;
+        }
+
+        .debates-list, .topics-list {
+            margin-top: 15px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .debate-item, .topic-item {
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .debate-item:hover, .topic-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .topic-item .topic-title {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .topic-item .topic-description {
+            font-size: 0.9em;
+            color: #555;
+            margin: 5px 0 10px 0;
+            line-height: 1.4;
+        }
+
+        .topic-item .topic-agents {
+            font-size: 0.9em;
+            color: #666;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .topic-item .agent-info {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            max-width: 45%;
+        }
+
+        .topic-item .agent-name {
+            font-weight: bold;
+            color: var(--secondary-color);
+        }
+
+        .topic-item .agent-role {
+            font-size: 0.85em;
+            color: #666;
+            font-style: italic;
+            margin-top: 2px;
+        }
+
+        .topic-item .vs {
+            font-size: 0.8em;
+            color: #888;
+            margin: 0 5px;
+            align-self: center;
+        }
+
+        .topic-item .topic-category {
+            font-size: 0.8em;
+            color: #888;
+            margin-top: 5px;
+            text-align: right;
+            font-style: italic;
+        }
+
+        .category-header {
+            font-weight: bold;
+            color: var(--secondary-color);
+            margin: 15px 0 5px 0;
+            padding-bottom: 5px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .no-topics, .error {
+            padding: 10px;
+            text-align: center;
+            color: #666;
+            font-style: italic;
+        }
+
+        .error {
+            color: #f44336;
+        }
+
+        .debate-item .debate-topic {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .debate-item .debate-agents {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.9em;
+            color: #666;
+        }
+
+        .debate-status {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+
+        .status-waiting {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+
+        .status-active {
+            background-color: #d4edda;
+            color: #155724;
+        }
+
+        .status-finished {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+
+        .agents-score {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 15px;
+            background-color: #f9f9f9;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .score-card {
+            flex: 1;
+            max-width: 45%;
+        }
+
+        .agent-name {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .score-bar {
+            height: 10px;
+            background-color: #e0e0e0;
+            border-radius: 5px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+
+        .score-fill {
+            height: 100%;
+            background-color: var(--primary-color);
+            transition: width 0.3s ease;
+        }
+
+        #playerCount {
+            font-size: 0.9em;
+            color: #666;
+            align-self: center;
+        }
+
+        .game-over {
+            text-align: center;
+            padding: 20px;
+            margin: 20px 0;
+            background-color: #f5f5f5;
+            border-radius: 8px;
+            font-size: 1.2em;
+            font-weight: bold;
+        }
+
+        .winner {
+            color: var(--success-color);
         }
 
         .section-header {
@@ -192,56 +441,138 @@
             color: #fff;
             opacity: 0.8;
         }
+
+        .system-message {
+            text-align: center;
+            padding: 8px;
+            margin: 10px 0;
+            background-color: #f0f0f0;
+            border-radius: 8px;
+            font-style: italic;
+            color: #666;
+        }
     </style>
 </head>
 
 <body>
     <div class="container">
-        <div class="chat-section">
+        <div class="lobby-section">
             <div class="section-header">
-                <h2>Chat</h2>
+                <h2>Debate Lobby</h2>
                 <div class="status">
                     <span id="connectionStatus">Disconnected</span>
-                    <span id="audioStatus">Idle</span>
                 </div>
             </div>
-            <div id="chatMessages" class="chat-messages"></div>
-            <div class="input-section">
-                <textarea id="message" placeholder="Type your message..."></textarea>
-                <button id="sendBtn" onclick="sendMessage()" disabled>Send</button>
-                <button id="connectBtn" onclick="connect()">Connect</button>
-                <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
-                <button id="recordBtn" onclick="toggleRecording()">Record</button>
+
+            <div class="debate-controls">
+                <div class="create-debate">
+                    <h3>Create New Debate</h3>
+                    <div class="form-group">
+                        <label for="topicSelect">Select Topic:</label>
+                        <select id="topicSelect">
+                            <option value="0">Custom Topic</option>
+                            <!-- Topics will be loaded dynamically -->
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="topic">Custom Topic:</label>
+                        <input type="text" id="topic" placeholder="Enter debate topic" value="Are memecoins net negative or positive for the crypto space?">
+                    </div>
+                    <div class="form-group">
+                        <label for="agent1">First Agent:</label>
+                        <select id="agent1"></select>
+                    </div>
+                    <div class="form-group">
+                        <label for="agent2">Second Agent:</label>
+                        <select id="agent2"></select>
+                    </div>
+                    <button id="createDebateBtn" class="action-btn create-btn">Create Debate</button>
+                </div>
+
+                <div class="premade-topics">
+                    <h3>Pre-made Topics</h3>
+                    <div class="form-group">
+                        <label for="categoryFilter">Filter by Category:</label>
+                        <select id="categoryFilter">
+                            <option value="">All Categories</option>
+                            <!-- Categories will be loaded dynamically -->
+                        </select>
+                    </div>
+                    <div id="topicsList" class="topics-list">
+                        <div class="loading">Loading topics...</div>
+                    </div>
+                </div>
+
+                <div class="active-debates">
+                    <h3>Active Debates</h3>
+                    <button id="refreshDebatesBtn" class="action-btn">Refresh List</button>
+                    <div id="debatesList" class="debates-list">
+                        <div class="loading">Loading debates...</div>
+                    </div>
+                </div>
             </div>
         </div>
-        <div class="log-section">
-            <div class="section-header">
-                <h2>System Log</h2>
+
+        <div class="main-content">
+            <div class="chat-section">
+                <div class="section-header">
+                    <h2 id="debateTitle">Select a Debate</h2>
+                    <div class="debate-info">
+                        <span class="debate-status" id="debateStatus">Not Connected</span>
+                        <span class="debate-id" id="debateId"></span>
+                    </div>
+                </div>
+
+                <div class="agents-score">
+                    <div class="score-card" id="agent1Card">
+                        <div class="agent-name" id="agent1Name">Agent 1</div>
+                        <div class="score-value" id="agent1ScoreValue">Score: 5.0</div>
+                        <div class="score-bar">
+                            <div class="score-fill" id="agent1ScoreFill" style="width: 50%"></div>
+                        </div>
+                    </div>
+
+                    <div class="score-card" id="agent2Card">
+                        <div class="agent-name" id="agent2Name">Agent 2</div>
+                        <div class="score-value" id="agent2ScoreValue">Score: 5.0</div>
+                        <div class="score-bar">
+                            <div class="score-fill" id="agent2ScoreFill" style="width: 50%"></div>
+                        </div>
+                    </div>
+
+                    <div id="playerCount">Players: 0</div>
+                </div>
+
+                <div id="chatMessages" class="chat-messages"></div>
+
+                <div class="input-section">
+                    <textarea id="message" placeholder="Type your message..." disabled></textarea>
+                    <button id="sendBtn" disabled>Send</button>
+                    <button id="leaveBtn" disabled>Leave Debate</button>
+                </div>
             </div>
-            <div id="logMessages" class="log-messages"></div>
+
+            <div class="log-section">
+                <div class="section-header">
+                    <h2>System Log</h2>
+                </div>
+                <div id="logMessages" class="log-messages"></div>
+            </div>
         </div>
     </div>
 
     <audio id="audioPlayer" style="display: none;"></audio>
 
     <script>
+        // Global variables
         let ws = null;
+        let currentDebateId = null;
+        let debateInfo = null;
+        let isConnected = false;
         const audioPlayer = document.getElementById('audioPlayer');
-        let audioQueue = [];
-        let isPlaying = false;
-        let mediaRecorder;
-        let audioChunks = [];
-        let isRecording = false;
-        let currentMessageScore = null;
-        let currentAgent1Score = 0;
-        let currentAgent2Score = 0;
-        let currentAgent1Role = "Unknown";
-        let currentAgent2Role = "Unknown";
+        const playerId = generateUniquePlayerId();
 
-        function updateAudioStatus(status) {
-            document.getElementById('audioStatus').textContent = status;
-        }
-
+        // Utility functions
         function log(message, type = '') {
             const logMessages = document.getElementById('logMessages');
             const entry = document.createElement('div');
@@ -254,325 +585,9 @@
             logMessages.scrollTop = logMessages.scrollHeight;
         }
 
-        function addMessage(message, isUser = false, agentName = '') {
-            const chatMessages = document.getElementById('chatMessages');
-            const messageDiv = document.createElement('div');
-            messageDiv.className = `message ${isUser ? 'user' : 'agent'}`;
-
-            if (!isUser && agentName) {
-                const nameSpan = document.createElement('span');
-                nameSpan.className = 'agent-name';
-                nameSpan.textContent = agentName;
-                messageDiv.appendChild(nameSpan);
-            }
-
-            const messageContent = document.createElement('div');
-            messageContent.className = 'message-content';
-            // Add player queue number prefix if available
-            if (isUser && data.queueNumber) {
-                messageContent.textContent = `Player ${data.queueNumber} message: ${message}`;
-            } else {
-                messageContent.textContent = message;
-            }
-            messageDiv.appendChild(messageContent);
-
-            // Add score and role display for user messages
-            if (isUser && currentMessageScore !== null) {
-                const scoreSpan = document.createElement('div');
-                scoreSpan.className = 'message-score';
-                scoreSpan.innerHTML = `
-                    Argument Score: ${currentMessageScore.toFixed(1)}/100 <br> 
-                    ${currentAgent1Score}/100 (${currentAgent1Role}) <br> 
-                    ${currentAgent2Score}/100 (${currentAgent2Role})
-                `;
-                messageDiv.appendChild(scoreSpan);
-                currentMessageScore = null;
-            }
-
-            chatMessages.appendChild(messageDiv);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-        }
-
-        function playNextInQueue() {
-            if (audioQueue.length === 0 || isPlaying) {
-                return;
-            }
-
-            isPlaying = true;
-            const nextAudio = audioQueue[0];
-            updateAudioStatus(`Loading ${nextAudio.agent}'s response...`);
-
-            const audio = new Audio(nextAudio.url);
-
-            audio.addEventListener('playing', () => {
-                updateAudioStatus(`Playing ${nextAudio.agent}'s response...`);
-                log(`Playing ${nextAudio.agent}'s audio response`, 'audio');
-            });
-
-            audio.addEventListener('ended', () => {
-                isPlaying = false;
-                audioQueue.shift(); // Remove the played audio from queue
-                updateAudioStatus(audioQueue.length > 0 ? 'Loading next response...' : 'Idle');
-                log(`Finished playing ${nextAudio.agent}'s response`, 'audio');
-                playNextInQueue(); // Play the next audio if available
-            });
-
-            audio.addEventListener('error', (e) => {
-                isPlaying = false;
-                audioQueue.shift(); // Remove the failed audio from queue
-                updateAudioStatus('Error');
-                log(`Error playing ${nextAudio.agent}'s audio: ${e.message}`, 'error');
-                playNextInQueue(); // Try to play the next audio
-            });
-
-            audio.play().catch(error => {
-                isPlaying = false;
-                audioQueue.shift(); // Remove the failed audio from queue
-                log(`Failed to play ${nextAudio.agent}'s audio: ${error.message}`, 'error');
-                updateAudioStatus('Error');
-                playNextInQueue(); // Try to play the next audio
-            });
-        }
-
-        function queueAudio(url, agent) {
-            audioQueue.push({ url, agent });
-            log(`Queued audio response from ${agent}`, 'audio');
-            playNextInQueue();
-        }
-
-        function connect() {
-            if (ws) {
-                log('Already connected');
-                return;
-            }
-
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/ws/conversation`;
-
-            ws = new WebSocket(wsUrl);
-            let reconnectAttempts = 0;
-            const maxReconnectAttempts = 5;
-            const reconnectDelay = 1000; // Start with 1 second
-
-            ws.onopen = () => {
-                log('Connected to server');
-                document.getElementById('connectionStatus').textContent = 'Connected';
-                updateButtonStates(true);
-                reconnectAttempts = 0;
-                startHeartbeat();
-            };
-
-            ws.onclose = (event) => {
-                log('Disconnected from server');
-                document.getElementById('connectionStatus').textContent = 'Disconnected';
-                updateButtonStates(false);
-                stopHeartbeat();
-                ws = null;
-
-                // Attempt to reconnect with exponential backoff
-                if (reconnectAttempts < maxReconnectAttempts) {
-                    const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 10000);
-                    log(`Reconnecting in ${delay / 1000} seconds...`);
-                    setTimeout(() => {
-                        reconnectAttempts++;
-                        connect();
-                    }, delay);
-                } else {
-                    log('Max reconnection attempts reached. Please try manually reconnecting.');
-                }
-            };
-
-            ws.onerror = (error) => {
-                log('WebSocket error: ' + error.message, 'error');
-            };
-
-            ws.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                if (data.type === 'pong') {
-                    updateConnectionStatus('Connected');
-                    return;
-                }
-                handleMessage(data);
-            };
-        }
-
-        // Heartbeat mechanism
-        let heartbeatInterval;
-        function startHeartbeat() {
-            heartbeatInterval = setInterval(() => {
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({ type: 'ping' }));
-                    updateConnectionStatus('Checking...');
-                    // If no pong received within 3 seconds, consider connection dead
-                    setTimeout(() => {
-                        if (document.getElementById('connectionStatus').textContent === 'Checking...') {
-                            ws.close();
-                        }
-                    }, 3000);
-                }
-            }, 30000); // Send heartbeat every 30 seconds
-        }
-
-        function stopHeartbeat() {
-            if (heartbeatInterval) {
-                clearInterval(heartbeatInterval);
-            }
-        }
-
-        function updateConnectionStatus(status) {
-            document.getElementById('connectionStatus').textContent = status;
-        }
-
-        function handleMessage(data) {
-            if (data.error) {
-                log(data.error, 'error');
-                return;
-            }
-
-            if (data.type === 'message') {
-                // Display message from other clients
-                const isUser = data.agent === playerId;
-                addMessage(data.content, isUser, isUser ? '' : `Player ${data.queueNumber}`);
-                return;
-            }
-
-            if (data.type === 'argument') {
-                const argument = data.argument;
-                log(`Argument Analysis:\nSide: ${argument.Side}\nScore: ${argument.Score.Average.toFixed(1)}/100\nStrength: ${argument.Score.Strength}/100\nLogic: ${argument.Score.Logic}/100`, 'argument');
-                return;
-            }
-
-            if (data.type === 'score' && data.message) {
-                const avgMatch = data.message.match(/Average:\s*([\d.]+)/);
-                const agent1Match = data.message.match(/Agent1_support:\s*(\d+)/);
-                const agent2Match = data.message.match(/Agent2_support:\s*(\d+)/);
-                const agent1RoleMatch = data.message.match(/Agent1_role:\s*([^\n]+)/);
-                const agent2RoleMatch = data.message.match(/Agent2_role:\s*([^\n]+)/);
-
-                if (avgMatch) {
-                    currentMessageScore = parseFloat(avgMatch[1]);
-                    currentAgent1Score = agent1Match ? parseInt(agent1Match[1]) : 0;
-                    currentAgent2Score = agent2Match ? parseInt(agent2Match[1]) : 0;
-                    currentAgent1Role = agent1RoleMatch ? agent1RoleMatch[1] : "Unknown";
-                    currentAgent2Role = agent2RoleMatch ? agent2RoleMatch[1] : "Unknown";
-
-                    if (window.lastUserMessage) {
-                        addMessage(window.lastUserMessage, true);
-                        window.lastUserMessage = null;
-                    }
-                }
-                const formattedScore = data.message.replace(/\n/g, '<br>');
-                log(formattedScore, 'score');
-                return;
-            }
-
-            if (data.type === 'conviction' && data.message) {
-                const formattedMessage = data.message.replace(/\n/g, '<br>');
-                log(formattedMessage, 'conviction');
-                return;
-            }
-
-            if (data.message) {
-                addMessage(data.message, false, data.agent);
-            }
-
-            if (data.audioUrl) {
-                queueAudio(data.audioUrl, data.agent);
-            }
-        }
-
-        function disconnect() {
-            if (ws) {
-                ws.close();
-                // Clear audio queue on disconnect
-                audioQueue = [];
-                isPlaying = false;
-                updateAudioStatus('Idle');
-            }
-        }
-
-        function updateButtonStates(connected) {
-            document.getElementById('sendBtn').disabled = !connected;
-            document.getElementById('connectBtn').disabled = connected;
-            document.getElementById('disconnectBtn').disabled = !connected;
-        }
-
-        document.getElementById('message').addEventListener('keypress', function (e) {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
-            }
-        });
-
-        function toggleRecording() {
-            if (isRecording) {
-                stopRecording();
-            } else {
-                startRecording();
-            }
-        }
-
-        function startRecording() {
-            navigator.mediaDevices.getUserMedia({ audio: true })
-                .then(stream => {
-                    mediaRecorder = new MediaRecorder(stream);
-                    mediaRecorder.ondataavailable = event => {
-                        audioChunks.push(event.data);
-                    };
-                    mediaRecorder.onstop = () => {
-                        const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-                        audioChunks = [];
-                        sendAudioToServer(audioBlob);
-                    };
-                    mediaRecorder.start();
-                    isRecording = true;
-                    document.getElementById('recordBtn').textContent = 'Stop';
-                })
-                .catch(error => {
-                    console.error('Error accessing microphone:', error);
-                });
-        }
-
-        function stopRecording() {
-            mediaRecorder.stop();
-            isRecording = false;
-            document.getElementById('recordBtn').textContent = 'Record';
-        }
-
-        function sendAudioToServer(audioBlob) {
-            const formData = new FormData();
-            formData.append('audio', audioBlob);
-
-            updateAudioStatus('Sending...');
-            fetch('/api/stt', {
-                method: 'POST',
-                body: formData
-            })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success && data.text) {
-                        log('Speech recognized: ' + data.text);
-                        // Send the recognized text through WebSocket
-                        if (ws && ws.readyState === WebSocket.OPEN) {
-                            const message = {
-                                type: 'text',
-                                message: data.text,
-                                topic: 'Are memecoins net negative or positive for the crypto space?'
-                            };
-                            ws.send(JSON.stringify(message));
-                            addMessage(data.text, true);
-                        } else {
-                            log('WebSocket not connected', 'error');
-                        }
-                    } else if (data.error) {
-                        log('Speech recognition error: ' + data.error, 'error');
-                    }
-                    updateAudioStatus('Idle');
-                })
-                .catch(error => {
-                    log('Error sending audio to server: ' + error, 'error');
-                    updateAudioStatus('Error');
-                });
+        function formatTime(timeString) {
+            const date = new Date(timeString);
+            return date.toLocaleString();
         }
 
         function generateUniquePlayerId() {
@@ -581,27 +596,700 @@
             return `player_${timestamp}_${random}`;
         }
 
-        // Initialize player ID when the page loads
-        const playerId = generateUniquePlayerId();
+        // Helper function to format time
+        function formatTime(timestamp) {
+            if (!timestamp) return '';
+
+            const date = new Date(timestamp);
+            const now = new Date();
+            const diffMs = now - date;
+            const diffMins = Math.floor(diffMs / 60000);
+
+            if (diffMins < 1) return 'Just now';
+            if (diffMins < 60) return `${diffMins}m ago`;
+
+            const diffHours = Math.floor(diffMins / 60);
+            if (diffHours < 24) return `${diffHours}h ago`;
+
+            const diffDays = Math.floor(diffHours / 24);
+            if (diffDays < 7) return `${diffDays}d ago`;
+
+            return date.toLocaleDateString();
+        }
+
+        // UI Functions
+        function addMessage(data) {
+            const chatMessages = document.getElementById('chatMessages');
+            const messageDiv = document.createElement('div');
+            const isPlayer = data.isPlayer || false;
+
+            messageDiv.className = `message ${isPlayer ? 'user' : 'agent'}`;
+
+            // Add agent/player name
+            const nameSpan = document.createElement('span');
+            nameSpan.className = 'agent-name';
+            nameSpan.textContent = data.agent || 'System';
+            messageDiv.appendChild(nameSpan);
+
+            // Add message content
+            const messageContent = document.createElement('div');
+            messageContent.className = 'message-content';
+            messageContent.textContent = data.message;
+            messageDiv.appendChild(messageContent);
+
+            // Add score if available
+            if (data.scores && data.scores.argument) {
+                const score = data.scores.argument;
+                const scoreSpan = document.createElement('div');
+                scoreSpan.className = 'message-score';
+                scoreSpan.innerHTML = `
+                    Argument Score: ${score.Average.toFixed(1)}/10 <br>
+                    Strength: ${score.Strength}/10 | Logic: ${score.Logic}/10 | Relevance: ${score.Relevance}/10
+                `;
+                messageDiv.appendChild(scoreSpan);
+            }
+
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function addSystemMessage(message) {
+            const chatMessages = document.getElementById('chatMessages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'system-message';
+            messageDiv.textContent = message;
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function handleGameOver(message) {
+            const chatMessages = document.getElementById('chatMessages');
+            const gameOverElement = document.createElement('div');
+            gameOverElement.className = 'game-over';
+
+            if (message.winner) {
+                gameOverElement.innerHTML = `Game Over! <span class="winner">${message.winner}</span> has won the debate!`;
+            } else {
+                gameOverElement.textContent = 'Game Over! The debate has ended in a draw.';
+            }
+
+            chatMessages.appendChild(gameOverElement);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            // Update debate status
+            updateDebateStatus('finished');
+
+            // Refresh debate info
+            fetchDebateInfo(currentDebateId);
+        }
+
+        function updateDebateStatus(status) {
+            const debateStatus = document.getElementById('debateStatus');
+            debateStatus.textContent = status;
+            debateStatus.className = `debate-status status-${status.toLowerCase()}`;
+
+            // Enable/disable input based on status
+            const isActive = status.toLowerCase() === 'active';
+            document.getElementById('message').disabled = !isActive || !isConnected;
+            document.getElementById('sendBtn').disabled = !isActive || !isConnected;
+
+            if (status.toLowerCase() === 'finished') {
+                addSystemMessage('This debate has ended.');
+            }
+        }
+
+        function updateScores(gameScore) {
+            if (!debateInfo) return;
+
+            const agent1Name = debateInfo.agent1_name;
+            const agent2Name = debateInfo.agent2_name;
+
+            // Update agent names
+            document.getElementById('agent1Name').textContent = agent1Name;
+            document.getElementById('agent2Name').textContent = agent2Name;
+
+            // Update scores
+            const agent1Score = gameScore[agent1Name] || 5.0;
+            const agent2Score = gameScore[agent2Name] || 5.0;
+
+            document.getElementById('agent1ScoreValue').textContent = `Score: ${agent1Score.toFixed(1)}`;
+            document.getElementById('agent2ScoreValue').textContent = `Score: ${agent2Score.toFixed(1)}`;
+
+            // Update score bars (0-10 scale)
+            document.getElementById('agent1ScoreFill').style.width = `${agent1Score * 10}%`;
+            document.getElementById('agent2ScoreFill').style.width = `${agent2Score * 10}%`;
+        }
+
+        function updateDebateInfo() {
+            if (!debateInfo) return;
+
+            // Update debate title
+            document.getElementById('debateTitle').textContent = debateInfo.topic;
+
+            // Update debate ID
+            document.getElementById('debateId').textContent = `ID: ${debateInfo.id.substring(0, 8)}...`;
+
+            // Update status
+            updateDebateStatus(debateInfo.status);
+
+            // Enable/disable buttons
+            document.getElementById('leaveBtn').disabled = !isConnected;
+        }
+
+        // WebSocket and API Functions
+        function connectToDebate(debateId) {
+            if (ws) {
+                ws.close();
+            }
+
+            currentDebateId = debateId;
+            document.getElementById('connectionStatus').textContent = 'Connecting...';
+
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/debate/${debateId}`;
+
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = function() {
+                isConnected = true;
+                document.getElementById('connectionStatus').textContent = 'Connected';
+                log(`Connected to debate ${debateId}`, 'success');
+                addSystemMessage('Connected to debate');
+
+                // Enable UI elements
+                document.getElementById('leaveBtn').disabled = false;
+                updateDebateStatus(debateInfo.status);
+            };
+
+            ws.onclose = function() {
+                isConnected = false;
+                document.getElementById('connectionStatus').textContent = 'Disconnected';
+                log(`Disconnected from debate ${debateId}`);
+                addSystemMessage('Disconnected from debate');
+
+                // Disable UI elements
+                document.getElementById('message').disabled = true;
+                document.getElementById('sendBtn').disabled = true;
+                document.getElementById('leaveBtn').disabled = true;
+            };
+
+            ws.onerror = function(error) {
+                log(`WebSocket error: ${error}`, 'error');
+                document.getElementById('connectionStatus').textContent = 'Error';
+            };
+
+            ws.onmessage = function(event) {
+                handleWebSocketMessage(event.data);
+            };
+        }
+
+        function handleWebSocketMessage(data) {
+            try {
+                const message = JSON.parse(data);
+                log(`Received message: ${JSON.stringify(message)}`, 'info');
+
+                switch (message.type) {
+                    case 'message':
+                        addMessage(message);
+                        break;
+
+                    case 'system':
+                        addSystemMessage(message.message);
+                        break;
+
+                    case 'game_score':
+                        updateScores(message.gameScore);
+                        break;
+
+                    case 'game_over':
+                        handleGameOver(message);
+                        break;
+
+                    case 'error':
+                        log(`Error: ${message.message}`, 'error');
+                        addSystemMessage(`Error: ${message.message}`);
+                        break;
+
+                    default:
+                        log(`Unknown message type: ${message.type}`, 'warning');
+                }
+            } catch (error) {
+                log(`Error handling message: ${error}`, 'error');
+            }
+        }
+
+        function fetchDebateInfo(debateId) {
+            fetch(`/api/debates/${debateId}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Debate not found');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    debateInfo = data.debate;
+                    updateDebateInfo();
+
+                    // Update player count if real-time info is available
+                    if (data.real_time && data.real_time.client_count) {
+                        document.getElementById('playerCount').textContent = `Players: ${data.real_time.client_count}`;
+                    }
+
+                    // Update scores if available
+                    if (data.real_time && data.real_time.game_score) {
+                        updateScores(data.real_time.game_score);
+                    }
+
+                    log(`Fetched debate info: ${debateInfo.topic}`, 'info');
+                })
+                .catch(error => {
+                    log(`Error fetching debate: ${error}`, 'error');
+                });
+        }
+
+        function loadDebates() {
+            const debatesList = document.getElementById('debatesList');
+            debatesList.innerHTML = '<div class="loading">Loading debates...</div>';
+
+            fetch('/api/debates')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.debates && data.debates.length > 0) {
+                        debatesList.innerHTML = '';
+                        data.debates.forEach(debate => {
+                            const debateItem = document.createElement('div');
+                            debateItem.className = 'debate-item';
+                            debateItem.dataset.id = debate.id;
+
+                            const statusClass = debate.status.toLowerCase();
+
+                            debateItem.innerHTML = `
+                                <div class="debate-topic">${debate.topic}</div>
+                                <div class="debate-agents">
+                                    <span>${debate.agent1_name}</span>
+                                    <span>vs</span>
+                                    <span>${debate.agent2_name}</span>
+                                </div>
+                                <div class="debate-footer">
+                                    <span class="debate-status status-${statusClass}">${debate.status}</span>
+                                    <span class="debate-time">${formatTime(debate.created_at)}</span>
+                                </div>
+                            `;
+
+                            debatesList.appendChild(debateItem);
+
+                            // Add click event to join debate
+                            debateItem.addEventListener('click', () => {
+                                joinDebate(debate.id);
+                            });
+                        });
+                    } else {
+                        debatesList.innerHTML = '<div class="no-debates">No active debates found</div>';
+                    }
+                })
+                .catch(error => {
+                    log(`Error loading debates: ${error}`, 'error');
+                    debatesList.innerHTML = '<div class="error">Error loading debates</div>';
+                });
+        }
+
+        function loadAgents() {
+            const agent1Select = document.getElementById('agent1');
+            const agent2Select = document.getElementById('agent2');
+
+            fetch('/api/agents')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.agents && data.agents.length > 0) {
+                        // Clear existing options
+                        agent1Select.innerHTML = '';
+                        agent2Select.innerHTML = '';
+
+                        // Add agents to dropdowns
+                        data.agents.forEach(agent => {
+                            const option1 = document.createElement('option');
+                            option1.value = agent.name;
+                            option1.textContent = agent.name;
+                            agent1Select.appendChild(option1);
+
+                            const option2 = document.createElement('option');
+                            option2.value = agent.name;
+                            option2.textContent = agent.name;
+                            agent2Select.appendChild(option2);
+                        });
+
+                        // Select different agents by default if possible
+                        if (data.agents.length > 1) {
+                            agent2Select.selectedIndex = 1;
+                        }
+                    } else {
+                        agent1Select.innerHTML = '<option value="">No agents available</option>';
+                        agent2Select.innerHTML = '<option value="">No agents available</option>';
+                    }
+                })
+                .catch(error => {
+                    log(`Error loading agents: ${error}`, 'error');
+                    agent1Select.innerHTML = '<option value="">Error loading agents</option>';
+                    agent2Select.innerHTML = '<option value="">Error loading agents</option>';
+                });
+        }
+
+        function loadTopics(category = '') {
+            const topicSelect = document.getElementById('topicSelect');
+            const topicsList = document.getElementById('topicsList');
+            const categoryFilter = document.getElementById('categoryFilter');
+
+            // Show loading state
+            topicsList.innerHTML = '<div class="loading">Loading topics...</div>';
+
+            // Build the URL with optional category filter
+            let url = '/api/topics';
+            if (category) {
+                url = `/api/topics/category/${encodeURIComponent(category)}`;
+            }
+
+            // Add pagination parameters
+            url += '?page=1&limit=100';
+
+            fetch(url)
+                .then(response => response.json())
+                .then(data => {
+                    if ((data.items && data.items.length > 0) || (data.topics && data.topics.length > 0)) {
+                        // Handle both response formats (items from pagination or direct topics array)
+                        const topicsArray = data.items || data.topics;
+                        // Clear existing options in dropdown
+                        topicSelect.innerHTML = '<option value="0">Custom Topic</option>';
+
+                        // Clear existing topics in list
+                        topicsList.innerHTML = '';
+
+                        // Collect all categories for the filter dropdown
+                        const categories = new Set();
+
+                        // Group topics by category
+                        const topicsByCategory = {};
+                        topicsArray.forEach(topic => {
+                            const category = topic.category || 'Uncategorized';
+                            categories.add(category);
+
+                            if (!topicsByCategory[category]) {
+                                topicsByCategory[category] = [];
+                            }
+                            topicsByCategory[category].push(topic);
+
+                            // Add to dropdown
+                            const option = document.createElement('option');
+                            option.value = topic.id;
+                            option.textContent = topic.title;
+                            option.dataset.agent1 = topic.agent1_name;
+                            option.dataset.agent2 = topic.agent2_name;
+                            option.dataset.agent1Role = topic.agent1_role;
+                            option.dataset.agent2Role = topic.agent2_role;
+                            option.dataset.description = topic.description || '';
+                            topicSelect.appendChild(option);
+                        });
+
+                        // Update category filter dropdown if it's empty
+                        if (categoryFilter.options.length <= 1) {
+                            // Keep the "All Categories" option
+                            const allCategoriesOption = categoryFilter.options[0];
+                            categoryFilter.innerHTML = '';
+                            categoryFilter.appendChild(allCategoriesOption);
+
+                            // Add all categories from the topics
+                            Array.from(categories).sort().forEach(cat => {
+                                const option = document.createElement('option');
+                                option.value = cat;
+                                option.textContent = cat;
+                                categoryFilter.appendChild(option);
+                            });
+                        }
+
+                        // Add topics to list by category
+                        Object.keys(topicsByCategory).sort().forEach(category => {
+                            // Add category header
+                            const categoryHeader = document.createElement('div');
+                            categoryHeader.className = 'category-header';
+                            categoryHeader.textContent = category;
+                            topicsList.appendChild(categoryHeader);
+
+                            // Add topics in this category
+                            topicsByCategory[category].forEach(topic => {
+                                const topicItem = document.createElement('div');
+                                topicItem.className = 'topic-item';
+                                topicItem.dataset.id = topic.id;
+
+                                // Create a more detailed topic item
+                                topicItem.innerHTML = `
+                                    <div class="topic-title">${topic.title}</div>
+                                    ${topic.description ? `<div class="topic-description">${topic.description}</div>` : ''}
+                                    <div class="topic-agents">
+                                        <div class="agent-info">
+                                            <span class="agent-name">${topic.agent1_name}</span>
+                                            <span class="agent-role">${topic.agent1_role}</span>
+                                        </div>
+                                        <span class="vs">vs</span>
+                                        <div class="agent-info">
+                                            <span class="agent-name">${topic.agent2_name}</span>
+                                            <span class="agent-role">${topic.agent2_role}</span>
+                                        </div>
+                                    </div>
+                                    <div class="topic-category">${category}</div>
+                                `;
+
+                                // Add click event to select this topic
+                                topicItem.addEventListener('click', () => {
+                                    // Set the dropdown to this topic
+                                    topicSelect.value = topic.id;
+
+                                    // Trigger the change event
+                                    const event = new Event('change');
+                                    topicSelect.dispatchEvent(event);
+
+                                    // Scroll to the create debate form
+                                    document.querySelector('.create-debate').scrollIntoView({ behavior: 'smooth' });
+                                });
+
+                                topicsList.appendChild(topicItem);
+                            });
+                        });
+
+                        // Add change event to update agents when topic is selected
+                        topicSelect.addEventListener('change', function() {
+                            const selectedOption = this.options[this.selectedIndex];
+                            const topicId = parseInt(this.value);
+
+                            if (topicId > 0) {
+                                // Pre-generated topic selected, update agent dropdowns
+                                const agent1 = selectedOption.dataset.agent1;
+                                const agent2 = selectedOption.dataset.agent2;
+
+                                // Update agent dropdowns
+                                const agent1Select = document.getElementById('agent1');
+                                const agent2Select = document.getElementById('agent2');
+
+                                // Find and select the correct agents
+                                for (let i = 0; i < agent1Select.options.length; i++) {
+                                    if (agent1Select.options[i].value === agent1) {
+                                        agent1Select.selectedIndex = i;
+                                        break;
+                                    }
+                                }
+
+                                for (let i = 0; i < agent2Select.options.length; i++) {
+                                    if (agent2Select.options[i].value === agent2) {
+                                        agent2Select.selectedIndex = i;
+                                        break;
+                                    }
+                                }
+
+                                // Disable agent selection
+                                agent1Select.disabled = true;
+                                agent2Select.disabled = true;
+
+                                // Update the custom topic field with the selected topic title
+                                document.getElementById('topic').value = selectedOption.textContent;
+                                document.getElementById('topic').disabled = true;
+                            } else {
+                                // Custom topic, enable agent selection
+                                document.getElementById('agent1').disabled = false;
+                                document.getElementById('agent2').disabled = false;
+                                document.getElementById('topic').disabled = false;
+                            }
+                        });
+                    } else {
+                        topicSelect.innerHTML = '<option value="0">No pre-generated topics available</option>';
+                        topicsList.innerHTML = '<div class="no-topics">No pre-generated topics available</div>';
+                    }
+                })
+                .catch(error => {
+                    log(`Error loading topics: ${error}`, 'error');
+                    topicSelect.innerHTML = '<option value="0">Error loading topics</option>';
+                    topicsList.innerHTML = '<div class="error">Error loading topics</div>';
+                });
+        }
+
+        function createDebate() {
+            const topicSelect = document.getElementById('topicSelect');
+            const topicId = parseInt(topicSelect.value);
+            const topic = document.getElementById('topic').value.trim();
+            const agent1 = document.getElementById('agent1').value;
+            const agent2 = document.getElementById('agent2').value;
+
+            // Prepare request data
+            const data = {};
+
+            // Check if using custom topic or pre-generated topic
+            if (topicId > 0) {
+                // Using pre-generated topic
+                data.topic_id = topicId;
+
+                // If using pre-generated topic, show the selected topic title
+                const selectedOption = topicSelect.options[topicSelect.selectedIndex];
+                log(`Creating debate with pre-generated topic: ${selectedOption.textContent}`, 'info');
+            } else {
+                // Using custom topic
+                if (!topic) {
+                    log('Please enter a debate topic', 'error');
+                    return;
+                }
+
+                if (!agent1 || !agent2) {
+                    log('Please select both agents', 'error');
+                    return;
+                }
+
+                if (agent1 === agent2) {
+                    log('Please select different agents', 'error');
+                    return;
+                }
+
+                // Set custom topic data
+                data.topic = topic;
+                data.agent1 = agent1;
+                data.agent2 = agent2;
+
+                log(`Creating custom debate: ${topic} (${agent1} vs ${agent2})`, 'info');
+            }
+
+            // Add player ID to track who created the debate
+            data.created_by = playerId;
+
+            // Send the request to create the debate
+            fetch('/api/debates', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(data)
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(data => {
+                        throw new Error(data.error || 'Failed to create debate');
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                log(`Debate created successfully: ${data.debate.id}`, 'success');
+
+                // Reset form for next use
+                if (topicId > 0) {
+                    // Reset topic selection
+                    topicSelect.value = 0;
+                    document.getElementById('topic').disabled = false;
+                    document.getElementById('agent1').disabled = false;
+                    document.getElementById('agent2').disabled = false;
+                }
+
+                // Refresh debates list and join the new debate
+                loadDebates();
+                joinDebate(data.debate.id);
+            })
+            .catch(error => {
+                log(`Error creating debate: ${error}`, 'error');
+            });
+        }
+
+        function joinDebate(debateId) {
+            // First fetch debate info
+            fetchDebateInfo(debateId);
+
+            // Then connect to the WebSocket
+            connectToDebate(debateId);
+
+            // Clear chat messages
+            document.getElementById('chatMessages').innerHTML = '';
+
+            // Add system message
+            addSystemMessage(`Joining debate ${debateId}...`);
+
+            log(`Joining debate: ${debateId}`, 'info');
+        }
+
+        function leaveDebate() {
+            if (ws) {
+                ws.close();
+            }
+
+            // Reset UI
+            document.getElementById('debateTitle').textContent = 'Select a Debate';
+            document.getElementById('debateId').textContent = '';
+            document.getElementById('debateStatus').textContent = 'Not Connected';
+            document.getElementById('debateStatus').className = 'debate-status';
+            document.getElementById('chatMessages').innerHTML = '';
+            document.getElementById('message').disabled = true;
+            document.getElementById('sendBtn').disabled = true;
+            document.getElementById('leaveBtn').disabled = true;
+
+            // Reset variables
+            currentDebateId = null;
+            debateInfo = null;
+            isConnected = false;
+
+            log('Left debate', 'info');
+        }
 
         function sendMessage() {
+            if (!isConnected || !ws || !currentDebateId) return;
+
             const messageInput = document.getElementById('message');
             const message = messageInput.value.trim();
 
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                const data = {
-                    message: message,
-                    topic: 'Are memecoins net negative or positive for the crypto space?',
-                    player_id: 'player1'
-                };
+            if (!message) return;
 
-                ws.send(JSON.stringify(data));
-                if (message) {
-                    window.lastUserMessage = message;
-                }
-                messageInput.value = '';
-            }
+            const data = {
+                type: 'text',
+                message: message,
+                player_id: playerId,
+                topic: debateInfo ? debateInfo.topic : ''
+            };
+
+            ws.send(JSON.stringify(data));
+            log(`Sent message: ${message}`, 'info');
+            messageInput.value = '';
         }
+
+        // Event Listeners
+        document.addEventListener('DOMContentLoaded', function() {
+            // Load initial data
+            loadAgents();
+            loadTopics();
+            loadDebates();
+
+            // Set up event listeners
+            document.getElementById('createDebateBtn').addEventListener('click', createDebate);
+            document.getElementById('refreshDebatesBtn').addEventListener('click', loadDebates);
+            document.getElementById('sendBtn').addEventListener('click', sendMessage);
+            document.getElementById('leaveBtn').addEventListener('click', leaveDebate);
+
+            // Category filter change event
+            document.getElementById('categoryFilter').addEventListener('change', function() {
+                const category = this.value;
+                loadTopics(category);
+            });
+
+            // Message input enter key
+            document.getElementById('message').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
+                }
+            });
+
+            // Auto-refresh debates every 30 seconds
+            setInterval(loadDebates, 30000);
+
+            // If we have a current debate, refresh its info every 10 seconds
+            setInterval(() => {
+                if (currentDebateId) {
+                    fetchDebateInfo(currentDebateId);
+                }
+            }, 10000);
+
+            log('Test interface initialized', 'info');
+        });
     </script>
 </body>
 
