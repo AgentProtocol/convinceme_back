@@ -127,7 +127,7 @@ func main() {
 
 	// Update server config to include both API keys
 	serverConfig := &server.Config{
-		Port:                     ":8080",
+		Port:                     "0.0.0.0:8080",
 		OpenAIKey:                openAIKey,
 		ElevenLabsKey:            elevenLabsKey, // Use ElevenLabs key
 		ResponseDelay:            500,

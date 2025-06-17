@@ -1,0 +1,19 @@
+name: convinceme
+
+networks:
+  internalNet:
+    driver: bridge
+
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:2025.2.0
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    networks:
+      - internalNet
+    restart: unless-stopped
+
+  backend:
+    build: .
+    networks:
+      - internalNet
+    restart: unless-stopped

@@ -4,6 +4,15 @@ PORT := 8080
 DB_PATH := data/arguments.db
 QUERY_PATH := sql/queries.sql
 
+# DeployMe
+.PHONY: deploy stop up logs ps
+up:
+	docker compose up --build -d
+deploy:
+	docker compose start
+stop logs ps:
+	docker compose $@
+
 # Directory structure
 .PHONY: dirs
 dirs:
@@ -256,4 +265,8 @@ help:
 	@echo "  make api-create-debate topic_id=1 - Create debate from topic"
 
 # Default target
+<<<<<<< main
 .DEFAULT_GOAL := help
+=======
+.DEFAULT_GOAL := help 
+>>>>>>> containerized
