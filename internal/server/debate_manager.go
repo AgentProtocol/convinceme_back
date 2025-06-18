@@ -12,6 +12,7 @@ import (
 	"github.com/neo/convinceme_backend/internal/agent"
 	"github.com/neo/convinceme_backend/internal/conversation"
 	"github.com/neo/convinceme_backend/internal/database"
+	"github.com/neo/convinceme_backend/internal/logging"
 	"github.com/neo/convinceme_backend/internal/scoring"
 )
 
@@ -33,7 +34,7 @@ func NewDebateManager(db database.DatabaseInterface, agents map[string]*agent.Ag
 		log.Printf("Warning: Failed to initialize scorer in DebateManager: %v", err)
 	}
 
-	return &DebateManager{
+	manager := &DebateManager{
 		db:      db,
 		agents:  agents,
 		debates: make(map[string]*conversation.DebateSession),
@@ -41,12 +42,27 @@ func NewDebateManager(db database.DatabaseInterface, agents map[string]*agent.Ag
 		scorer:  scorer,
 		server:  server,
 	}
+
+	// Load active debates from database into memory
+	err = manager.LoadActiveDebates()
+	if err != nil {
+		log.Printf("Warning: Failed to load active debates: %v", err)
+	}
+
+	return manager
 }
 
 // CreateDebate creates a new debate with the given topic and agents
 func (m *DebateManager) CreateDebate(topic string, agent1, agent2 *agent.Agent, createdBy string) (string, error) {
 	// Generate a unique ID for the debate
 	debateID := uuid.New().String()
+
+	logging.LogDebateEvent("debate_creation_start", debateID, map[string]interface{}{
+		"topic":      topic,
+		"agent1":     agent1.GetName(),
+		"agent2":     agent2.GetName(),
+		"created_by": createdBy,
+	})
 
 	// Create debate config
 	config := conversation.DefaultConfig()
@@ -55,12 +71,20 @@ func (m *DebateManager) CreateDebate(topic string, agent1, agent2 *agent.Agent, 
 	// Create a new debate session
 	session, err := conversation.NewDebateSession(debateID, agent1, agent2, config, m.apiKey)
 	if err != nil {
+		logging.LogDebateEvent("debate_session_creation_failed", debateID, map[string]interface{}{
+			"error": err,
+			"topic": topic,
+		})
 		return "", fmt.Errorf("failed to create debate session: %v", err)
 	}
 
 	// Store debate in database
 	err = m.db.CreateDebate(debateID, topic, "waiting", agent1.GetName(), agent2.GetName())
 	if err != nil {
+		logging.LogDebateEvent("debate_db_creation_failed", debateID, map[string]interface{}{
+			"error": err,
+			"topic": topic,
+		})
 		return "", fmt.Errorf("failed to store debate in database: %v", err)
 	}
 
@@ -69,8 +93,12 @@ func (m *DebateManager) CreateDebate(topic string, agent1, agent2 *agent.Agent, 
 	m.debates[debateID] = session
 	m.debatesMutex.Unlock()
 
-	log.Printf("Created new debate %s on topic '%s' with agents %s vs %s",
-		debateID, topic, agent1.GetName(), agent2.GetName())
+	logging.LogDebateEvent("debate_created_successfully", debateID, map[string]interface{}{
+		"topic":  topic,
+		"agent1": agent1.GetName(),
+		"agent2": agent2.GetName(),
+		"status": "waiting",
+	})
 
 	return debateID, nil
 }
@@ -165,9 +193,16 @@ func (m *DebateManager) StartDebateLoop(session *conversation.DebateSession) {
 			}
 
 			// Update game score based on agent and score
+			// Use simple +1/-1 scoring based on argument strength
 			var agent1Delta, agent2Delta int
-			scoreDelta := int(score.Average)
 
+			// Strong arguments (score > 7.0) give +1, weak arguments (score < 4.0) give -1
+			// Calculate delta based on sum of all score parameters
+			// Sum all parameters (Strength + Relevance + Logic + Truth + Humor)
+			totalScore := score.Strength + score.Relevance + score.Logic + score.Truth + score.Humor
+			scoreDelta := int(totalScore) // This will be the HP change
+
+			// Better agent gets positive points, weaker side gets negative
 			if agentName == session.Agent1.GetName() {
 				agent1Delta = scoreDelta
 				agent2Delta = -scoreDelta
@@ -194,7 +229,7 @@ func (m *DebateManager) StartDebateLoop(session *conversation.DebateSession) {
 			message := gin.H{
 				"type":    "message",
 				"agent":   agentName,
-				"content": response,  // Changed from "message" to "content" to match frontend
+				"content": response, // Changed from "message" to "content" to match frontend
 				"scores": gin.H{
 					"argument": score,
 				},
@@ -265,17 +300,17 @@ func (m *DebateManager) StartDebateLoop(session *conversation.DebateSession) {
 	}()
 }
 
-// NormalizeScore normalizes a score to a 0-10 scale for display
+// NormalizeScore normalizes a score to a 0-100 scale for display
 func (m *DebateManager) NormalizeScore(score int) float64 {
-	maxScore := 200.0
-	normalized := float64(score) / maxScore * 10.0
-	if normalized < 0 {
+	// Since we start at 100 HP and use sum of parameters, keep original scale
+	// Just ensure they stay within reasonable bounds
+	if score < 0 {
 		return 0
 	}
-	if normalized > 10 {
-		return 10
+	if score > 200 {
+		return 200
 	}
-	return normalized
+	return float64(score)
 }
 
 // RemoveDebate removes a debate from the manager
@@ -327,4 +362,52 @@ func (m *DebateManager) CleanupInactiveDebates() {
 		delete(m.debates, id)
 		log.Printf("Cleaned up inactive debate %s", id)
 	}
+}
+
+// LoadActiveDebates loads active debates from the database into memory
+func (m *DebateManager) LoadActiveDebates() error {
+	m.debatesMutex.Lock()
+	defer m.debatesMutex.Unlock()
+
+	// Get active debates from database
+	debates, err := m.db.ListActiveDebates()
+	if err != nil {
+		return fmt.Errorf("failed to list active debates: %v", err)
+	}
+
+	log.Printf("Loading %d active debates into memory", len(debates))
+
+	for _, debate := range debates {
+		// Get agents for this debate
+		agent1, exists1 := m.agents[debate.Agent1Name]
+		agent2, exists2 := m.agents[debate.Agent2Name]
+
+		if !exists1 || !exists2 {
+			log.Printf("Warning: Skipping debate %s - missing agents (Agent1: %s exists: %v, Agent2: %s exists: %v)",
+				debate.ID, debate.Agent1Name, exists1, debate.Agent2Name, exists2)
+			continue
+		}
+
+		// Create debate config
+		config := conversation.DefaultConfig()
+		config.Topic = debate.Topic
+
+		// Create new debate session
+		session, err := conversation.NewDebateSession(debate.ID, agent1, agent2, config, m.apiKey)
+		if err != nil {
+			log.Printf("Warning: Failed to create session for debate %s: %v", debate.ID, err)
+			continue
+		}
+
+		// Set the correct status from database
+		session.UpdateStatus(debate.Status)
+
+		// Store in memory
+		m.debates[debate.ID] = session
+
+		log.Printf("Loaded debate %s (%s) into memory with status: %s", debate.ID, debate.Topic, debate.Status)
+	}
+
+	log.Printf("Successfully loaded %d debates into memory", len(m.debates))
+	return nil
 }

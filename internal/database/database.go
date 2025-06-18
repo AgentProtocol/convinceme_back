@@ -10,6 +10,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/neo/convinceme_backend/internal/logging"
 	"github.com/neo/convinceme_backend/internal/scoring"
 )
 
@@ -56,15 +57,30 @@ type Argument struct {
 
 // New creates a new database connection and initializes the schema
 func New(dataDir string) (*Database, error) {
+	logging.Info("Initializing database", map[string]interface{}{
+		"data_dir": dataDir,
+	})
+
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		logging.Error("Failed to create data directory", map[string]interface{}{
+			"error":    err,
+			"data_dir": dataDir,
+		})
 		return nil, fmt.Errorf("failed to create data directory: %v", err)
 	}
 
 	dbPath := filepath.Join(dataDir, "arguments.db")
+	logging.Debug("Opening database connection", map[string]interface{}{
+		"db_path": dbPath,
+	})
 
 	// Configure connection pool
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
+		logging.Error("Failed to open database", map[string]interface{}{
+			"error":   err,
+			"db_path": dbPath,
+		})
 		return nil, fmt.Errorf("failed to open database: %v", err)
 	}
 
@@ -74,18 +90,34 @@ func New(dataDir string) (*Database, error) {
 	db.SetConnMaxLifetime(30 * time.Minute) // Maximum lifetime of a connection
 	db.SetConnMaxIdleTime(10 * time.Minute) // Maximum idle time of a connection
 
+	logging.Debug("Database connection pool configured", map[string]interface{}{
+		"max_open_conns":    25,
+		"max_idle_conns":    10,
+		"conn_max_lifetime": "30m",
+		"conn_max_idle":     "10m",
+	})
+
 	// Verify connection
 	if err := db.Ping(); err != nil {
+		logging.Error("Failed to ping database", map[string]interface{}{
+			"error": err,
+		})
 		return nil, fmt.Errorf("failed to ping database: %v", err)
 	}
 
 	// Run migrations
+	logging.Info("Running database migrations")
 	migrationManager := NewMigrationManager(db)
 	err = migrationManager.MigrateUp("migrations")
 	if err != nil {
+		logging.Error("Failed to run migrations", map[string]interface{}{
+			"error": err,
+		})
 		return nil, fmt.Errorf("failed to run migrations: %v", err)
 	}
+	logging.Info("Database migrations completed successfully")
 
+	logging.Info("Database initialized successfully")
 	return &Database{db: db}, nil
 }
 
@@ -96,17 +128,43 @@ func (d *Database) Close() error {
 
 // SaveArgument saves a new argument to the database, linking it to a debate
 func (d *Database) SaveArgument(playerID, topic, content, side, debateID string) (int64, error) {
+	logging.LogDatabaseEvent("INSERT", "arguments", map[string]interface{}{
+		"player_id":      playerID,
+		"topic":          topic,
+		"side":           side,
+		"debate_id":      debateID,
+		"content_length": len(content),
+	})
+
 	query := `INSERT INTO arguments (player_id, topic, content, side, debate_id) VALUES (?, ?, ?, ?, ?)`
 	result, err := d.db.Exec(query, playerID, topic, content, side, debateID)
 	if err != nil {
+		logging.Error("Failed to save argument", map[string]interface{}{
+			"error":     err,
+			"player_id": playerID,
+			"debate_id": debateID,
+		})
 		return 0, fmt.Errorf("failed to save argument: %v", err)
 	}
 
-	return result.LastInsertId()
+	id, _ := result.LastInsertId()
+	logging.Debug("Argument saved successfully", map[string]interface{}{
+		"argument_id": id,
+		"player_id":   playerID,
+		"debate_id":   debateID,
+	})
+
+	return id, nil
 }
 
 // SaveScore saves a score for an argument, linking it to a debate
 func (d *Database) SaveScore(argumentID int64, debateID string, score *scoring.ArgumentScore) error {
+	logging.LogDatabaseEvent("INSERT", "scores", map[string]interface{}{
+		"argument_id": argumentID,
+		"debate_id":   debateID,
+		"average":     score.Average,
+	})
+
 	query := `INSERT INTO scores (argument_id, debate_id, strength, relevance, logic, truth, humor, average, explanation)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
@@ -114,8 +172,19 @@ func (d *Database) SaveScore(argumentID int64, debateID string, score *scoring.A
 		score.Truth, score.Humor, score.Average, score.Explanation)
 
 	if err != nil {
+		logging.Error("Failed to save score", map[string]interface{}{
+			"error":       err,
+			"argument_id": argumentID,
+			"debate_id":   debateID,
+		})
 		return fmt.Errorf("failed to save score for debate %s: %v", debateID, err)
 	}
+
+	logging.Debug("Score saved successfully", map[string]interface{}{
+		"argument_id": argumentID,
+		"debate_id":   debateID,
+		"score":       score.Average,
+	})
 
 	return nil
 }

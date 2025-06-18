@@ -18,6 +18,7 @@ import (
 	"github.com/neo/convinceme_backend/internal/audio"
 	"github.com/neo/convinceme_backend/internal/auth"
 	"github.com/neo/convinceme_backend/internal/conversation"
+	"github.com/neo/convinceme_backend/internal/logging"
 	"github.com/quic-go/quic-go/http3"
 
 	"github.com/gin-gonic/gin"
@@ -156,8 +157,8 @@ func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey str
 		config:       config,
 		scorer:       scorer, // Scorer might be passed to sessions later
 		db:           db,
-		auth:         authHandler,   // Authentication handler
-		featureFlags: featureFlags,  // Feature flag manager
+		auth:         authHandler,  // Authentication handler
+		featureFlags: featureFlags, // Feature flag manager
 		// Removed initialization of conversation-specific fields
 	}
 
@@ -374,12 +375,19 @@ func (s *Server) getDebateHandler(c *gin.Context) {
 
 func (s *Server) handleDebateWebSocket(c *gin.Context) {
 	debateID := c.Param("debateID")
-	log.Printf("WebSocket connection attempt for debate ID: %s", debateID)
+	clientIP := c.ClientIP()
+
+	logging.LogWebSocketEvent("connection_attempt", debateID, "", map[string]interface{}{
+		"client_ip":  clientIP,
+		"user_agent": c.GetHeader("User-Agent"),
+	})
 
 	// 1. Get DebateSession from manager
 	session, exists := s.debateManager.GetDebate(debateID)
 	if !exists {
-		log.Printf("Debate session %s not found", debateID)
+		logging.LogWebSocketEvent("debate_not_found", debateID, "", map[string]interface{}{
+			"client_ip": clientIP,
+		})
 		// Optionally send an error back before closing if possible,
 		// but Upgrade might fail anyway if we write before upgrading.
 		// For simplicity, just return. The client will see a failed connection.
@@ -389,26 +397,42 @@ func (s *Server) handleDebateWebSocket(c *gin.Context) {
 	// 2. Upgrade connection
 	ws, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
-		log.Printf("Failed to upgrade connection for debate %s: %v", debateID, err)
+		logging.LogWebSocketEvent("upgrade_failed", debateID, "", map[string]interface{}{
+			"error":     err,
+			"client_ip": clientIP,
+		})
 		return
 	}
 	defer ws.Close()
-	log.Printf("WebSocket connection upgraded for debate %s", debateID)
 
 	// Generate a unique Player ID for this connection
 	// TODO: Replace with actual user authentication/ID if available
 	playerID := fmt.Sprintf("player_%s", uuid.New().String()[:8])
+
+	logging.LogWebSocketEvent("connection_established", debateID, playerID, map[string]interface{}{
+		"client_ip": clientIP,
+	})
 
 	// 3. Add client to session
 	session.AddClient(ws, playerID)
 
 	// 4. If first client for a 'waiting' debate, start the debate loop
 	if session.GetStatus() == "waiting" {
+		logging.LogDebateEvent("status_change", debateID, map[string]interface{}{
+			"from_status":  "waiting",
+			"to_status":    "active",
+			"triggered_by": playerID,
+		})
+
 		session.UpdateStatus("active")
 		// Update DB status as well
 		err := s.db.UpdateDebateStatus(debateID, "active")
 		if err != nil {
-			log.Printf("Error updating debate %s status to active in DB: %v", debateID, err)
+			logging.Error("Failed to update debate status in database", map[string]interface{}{
+				"error":     err,
+				"debate_id": debateID,
+				"status":    "active",
+			})
 			// Handle error - maybe close connection?
 		}
 		s.debateManager.StartDebateLoop(session)
@@ -417,6 +441,9 @@ func (s *Server) handleDebateWebSocket(c *gin.Context) {
 	// Ensure client is removed on disconnect
 	defer func() {
 		_, remainingClients := session.RemoveClient(ws)
+		logging.LogWebSocketEvent("client_disconnected", debateID, playerID, map[string]interface{}{
+			"remaining_clients": remainingClients,
+		})
 		// If last client leaves an active debate, consider stopping it
 		if remainingClients == 0 && session.GetStatus() == "active" {
 			log.Printf("Last client left debate %s. Stopping loop.", debateID)
@@ -486,7 +513,8 @@ func (s *Server) handleDebateWebSocket(c *gin.Context) {
 		// 4. Update game score based on player message
 		// Determine which agent the player is supporting/opposing
 		var agent1Delta, agent2Delta int
-		scoreDelta := int(score.Average)
+		// Use sum of all parameters like the agents do
+		scoreDelta := int(score.Strength + score.Relevance + score.Logic + score.Truth + score.Humor)
 
 		// If player explicitly chose a side, use that
 		if msg.Side == "agent1" || strings.Contains(strings.ToLower(msg.Message), strings.ToLower(session.Agent1.GetName())) {
@@ -508,8 +536,8 @@ func (s *Server) handleDebateWebSocket(c *gin.Context) {
 		// 5. Broadcast the player message with score
 		session.Broadcast(gin.H{
 			"type":     "message",
-			"agent":    playerID,
-			"message":  msg.Message,
+			"agent":    playerID, // Show full player ID
+			"content":  msg.Message,
 			"isPlayer": true,
 			"scores": gin.H{
 				"argument": score,

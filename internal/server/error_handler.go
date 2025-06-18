@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/neo/convinceme_backend/internal/logging"
 )
 
 // ErrorResponse represents a standardized error response
@@ -53,7 +54,7 @@ func ErrorHandler() gin.HandlerFunc {
 			}
 
 			// Log the error
-			fmt.Printf("[ERROR] %s - %s - %s\n", errorResponse.Timestamp.Format(time.RFC3339), 
+			fmt.Printf("[ERROR] %s - %s - %s\n", errorResponse.Timestamp.Format(time.RFC3339),
 				errorResponse.Path, err.Error())
 
 			// Return error response
@@ -82,7 +83,7 @@ func LoggingMiddleware() gin.HandlerFunc {
 		// Process request
 		c.Next()
 
-		// Log request
+		// Calculate latency
 		latency := time.Since(start)
 		status := c.Writer.Status()
 		method := c.Request.Method
@@ -90,16 +91,25 @@ func LoggingMiddleware() gin.HandlerFunc {
 		userID, _ := c.Get("userID")
 		requestID, _ := c.Get("RequestID")
 
-		// Log format: timestamp - request_id - method - path - status - latency - user_id
-		fmt.Printf("[%s] %s - %s - %s - %d - %v - %v\n",
-			time.Now().Format(time.RFC3339),
-			requestID,
-			method,
-			path,
-			status,
-			latency,
-			userID,
-		)
+		// Determine log level based on status code
+		if status >= 500 {
+			logging.LogHTTPRequest(method, path, status, latency, map[string]interface{}{
+				"request_id": requestID,
+				"user_id":    userID,
+				"error":      "server_error",
+			})
+		} else if status >= 400 {
+			logging.LogHTTPRequest(method, path, status, latency, map[string]interface{}{
+				"request_id": requestID,
+				"user_id":    userID,
+				"error":      "client_error",
+			})
+		} else {
+			logging.LogHTTPRequest(method, path, status, latency, map[string]interface{}{
+				"request_id": requestID,
+				"user_id":    userID,
+			})
+		}
 	}
 }
 
@@ -108,13 +118,16 @@ func RecoveryMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		defer func() {
 			if err := recover(); err != nil {
-				// Log the error
-				fmt.Printf("[PANIC] %s - %s - %v\n%s\n", 
-					time.Now().Format(time.RFC3339),
-					c.Request.URL.Path,
-					err,
-					string(debug.Stack()),
-				)
+				requestID, _ := c.Get("RequestID")
+
+				// Log the panic with our logging system
+				logging.Error("Server panic occurred", map[string]interface{}{
+					"request_id": requestID,
+					"path":       c.Request.URL.Path,
+					"method":     c.Request.Method,
+					"error":      err,
+					"stack":      string(debug.Stack()),
+				})
 
 				// Create error response
 				errorResponse := ErrorResponse{

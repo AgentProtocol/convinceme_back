@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	"github.com/neo/convinceme_backend/internal/logging"
 )
 
 // TTSProvider represents the text-to-speech provider
@@ -99,14 +101,43 @@ func (s *TTSService) getVoiceID(voice string) string {
 
 // GenerateAudio generates audio from text using the configured provider
 func (s *TTSService) GenerateAudio(ctx context.Context, text string) ([]byte, error) {
+	textPreview := text
+	if len(text) > 50 {
+		textPreview = text[:50]
+	}
+
+	logging.LogTTSEvent("audio_generation_start", s.voice, map[string]interface{}{
+		"provider":     string(s.provider),
+		"text_length":  len(text),
+		"text_preview": textPreview,
+	})
+
+	var audioData []byte
+	var err error
+
 	switch s.provider {
 	case ProviderOpenAI:
-		return s.generateAudioOpenAI(ctx, text)
+		audioData, err = s.generateAudioOpenAI(ctx, text)
 	case ProviderElevenLabs:
-		return s.generateAudioElevenLabs(ctx, text)
+		audioData, err = s.generateAudioElevenLabs(ctx, text)
 	default:
-		return nil, fmt.Errorf("unsupported TTS provider: %s", s.provider)
+		err = fmt.Errorf("unsupported TTS provider: %s", s.provider)
 	}
+
+	if err != nil {
+		logging.LogTTSEvent("audio_generation_failed", s.voice, map[string]interface{}{
+			"provider": string(s.provider),
+			"error":    err,
+		})
+		return nil, err
+	}
+
+	logging.LogTTSEvent("audio_generation_success", s.voice, map[string]interface{}{
+		"provider":   string(s.provider),
+		"audio_size": len(audioData),
+	})
+
+	return audioData, nil
 }
 
 // generateAudioOpenAI converts text to speech using OpenAI's TTS API

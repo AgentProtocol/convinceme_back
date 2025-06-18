@@ -10,6 +10,7 @@ import (
 
 	"github.com/gorilla/websocket" // Added for Clients map
 	"github.com/neo/convinceme_backend/internal/agent"
+	"github.com/neo/convinceme_backend/internal/logging"
 	"github.com/neo/convinceme_backend/internal/player"
 	"github.com/neo/convinceme_backend/internal/tools"
 	"github.com/neo/convinceme_backend/internal/types"
@@ -82,8 +83,8 @@ func NewDebateSession(id string, agent1, agent2 *agent.Agent, config DebateConfi
 		// Decide if judge is critical or optional
 	}
 
-	// Initialize GameScore (e.g., starting at 100 each)
-	initialScore := 100 // Or get from config/constants
+	// Initialize GameScore (starting at 100 HP each)
+	initialScore := 100 // Start with 100 HP for both agents
 
 	return &DebateSession{
 		DebateID:    id,
@@ -127,25 +128,40 @@ func (d *DebateSession) RemoveClient(conn *websocket.Conn) (playerID string, rem
 func (d *DebateSession) Broadcast(message interface{}) {
 	d.debateMutex.RLock()
 	defer d.debateMutex.RUnlock()
-	
+
 	clientCount := len(d.Clients)
-	log.Printf("Broadcasting to %d clients in debate %s", clientCount, d.DebateID)
-	
+
+	logging.LogWebSocketEvent("broadcast_start", d.DebateID, "", map[string]interface{}{
+		"client_count": clientCount,
+		"message_type": fmt.Sprintf("%T", message),
+	})
+
 	if clientCount == 0 {
-		log.Printf("No clients connected to receive broadcast in debate %s", d.DebateID)
+		logging.LogWebSocketEvent("broadcast_no_clients", d.DebateID, "", map[string]interface{}{})
 		return
 	}
-	
+
+	successCount := 0
+	errorCount := 0
+
 	for client := range d.Clients {
 		// Write synchronously to avoid concurrent writes to the same connection
 		// Each WebSocket connection can only have one writer at a time
 		if err := client.WriteJSON(message); err != nil {
-			log.Printf("Error broadcasting to client in debate %s: %v", d.DebateID, err)
+			errorCount++
+			logging.LogWebSocketEvent("broadcast_client_error", d.DebateID, "", map[string]interface{}{
+				"error": err,
+			})
 			// Optional: Consider removing the client if write fails repeatedly
 		} else {
-			log.Printf("Successfully broadcast message to client in debate %s", d.DebateID)
+			successCount++
 		}
 	}
+
+	logging.LogWebSocketEvent("broadcast_completed", d.DebateID, "", map[string]interface{}{
+		"success_count": successCount,
+		"error_count":   errorCount,
+	})
 }
 
 // AddHistoryEntry adds a message to the debate history safely
