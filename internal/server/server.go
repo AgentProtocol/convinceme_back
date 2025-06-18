@@ -84,9 +84,6 @@ func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey str
 		log.Printf("Warning: Failed to initialize scorer: %v", err)
 	}
 
-	// Initialize Debate Manager
-	debateManager := NewDebateManager(db, agents, apiKey)
-
 	// Initialize Auth handler
 	authHandler := auth.New(auth.Config{
 		JWTSecret:                config.JWTSecret,
@@ -152,18 +149,21 @@ func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey str
 	}
 
 	server := &Server{
-		router:        router,
-		agents:        agents, // Keep agents map for reference if needed by manager/server
-		audioCache:    make(map[string]audioCache),
-		useHTTPS:      useHTTPS,
-		config:        config,
-		scorer:        scorer, // Scorer might be passed to sessions later
-		db:            db,
-		debateManager: debateManager, // Assign the manager
-		auth:          authHandler,   // Authentication handler
-		featureFlags:  featureFlags,  // Feature flag manager
+		router:       router,
+		agents:       agents, // Keep agents map for reference if needed by manager/server
+		audioCache:   make(map[string]audioCache),
+		useHTTPS:     useHTTPS,
+		config:       config,
+		scorer:       scorer, // Scorer might be passed to sessions later
+		db:           db,
+		auth:         authHandler,   // Authentication handler
+		featureFlags: featureFlags,  // Feature flag manager
 		// Removed initialization of conversation-specific fields
 	}
+
+	// Initialize Debate Manager with server reference
+	debateManager := NewDebateManager(db, agents, apiKey, server)
+	server.debateManager = debateManager
 
 	// --- Update Routes ---
 	// router.GET("/ws/conversation", server.handleConversationWebSocket) // Old route
@@ -574,6 +574,24 @@ func (s *Server) cleanupCache() {
 			delete(s.audioCache, id)
 		}
 	}
+}
+
+// CacheAudio stores audio data in the cache and returns the URL to access it
+func (s *Server) CacheAudio(audioData []byte) string {
+	s.cacheMutex.Lock()
+	defer s.cacheMutex.Unlock()
+
+	// Generate unique ID for the audio
+	audioID := uuid.New().String()
+
+	// Store in cache
+	s.audioCache[audioID] = audioCache{
+		data:      audioData,
+		timestamp: time.Now(),
+	}
+
+	// Return the URL path
+	return fmt.Sprintf("/api/audio/%s", audioID)
 }
 
 // handleConversationWebSocket is removed - replaced by handleDebateWebSocket

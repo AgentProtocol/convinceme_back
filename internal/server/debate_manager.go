@@ -23,10 +23,11 @@ type DebateManager struct {
 	debatesMutex sync.RWMutex
 	apiKey       string
 	scorer       *scoring.Scorer
+	server       *Server // Reference to the server for audio caching
 }
 
 // NewDebateManager creates a new debate manager
-func NewDebateManager(db database.DatabaseInterface, agents map[string]*agent.Agent, apiKey string) *DebateManager {
+func NewDebateManager(db database.DatabaseInterface, agents map[string]*agent.Agent, apiKey string, server *Server) *DebateManager {
 	scorer, err := scoring.NewScorer(apiKey)
 	if err != nil {
 		log.Printf("Warning: Failed to initialize scorer in DebateManager: %v", err)
@@ -38,6 +39,7 @@ func NewDebateManager(db database.DatabaseInterface, agents map[string]*agent.Ag
 		debates: make(map[string]*conversation.DebateSession),
 		apiKey:  apiKey,
 		scorer:  scorer,
+		server:  server,
 	}
 }
 
@@ -135,6 +137,17 @@ func (m *DebateManager) StartDebateLoop(session *conversation.DebateSession) {
 			// Add to history
 			session.AddHistoryEntry(agentName, response, false)
 
+			// Generate audio for the response
+			audioData, err := agent.GenerateAndStreamAudio(ctx, response)
+			var audioURL string
+			if err != nil {
+				log.Printf("Error generating audio for %s in debate %s: %v", agentName, debateID, err)
+			} else {
+				// Store audio in cache and get URL
+				audioURL = m.server.CacheAudio(audioData)
+				log.Printf("Generated audio for %s in debate %s: %s", agentName, debateID, audioURL)
+			}
+
 			// Score the argument
 			score, err := m.scorer.ScoreArgument(ctx, response, session.Config.Topic)
 			if err != nil {
@@ -178,14 +191,30 @@ func (m *DebateManager) StartDebateLoop(session *conversation.DebateSession) {
 			}
 
 			// Broadcast response with score
-			session.Broadcast(gin.H{
+			message := gin.H{
 				"type":    "message",
 				"agent":   agentName,
-				"message": response,
+				"content": response,  // Changed from "message" to "content" to match frontend
 				"scores": gin.H{
 					"argument": score,
 				},
-			})
+			}
+
+			// Add audio URL if available
+			if audioURL != "" {
+				message["audioUrl"] = audioURL
+			}
+
+			session.Broadcast(message)
+
+			// Also broadcast separate audio message for frontend audio player
+			if audioURL != "" {
+				session.Broadcast(gin.H{
+					"type":     "audio",
+					"audioUrl": audioURL,
+					"agent":    agentName,
+				})
+			}
 
 			// Broadcast updated game score
 			session.Broadcast(gin.H{

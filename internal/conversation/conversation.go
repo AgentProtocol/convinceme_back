@@ -127,14 +127,24 @@ func (d *DebateSession) RemoveClient(conn *websocket.Conn) (playerID string, rem
 func (d *DebateSession) Broadcast(message interface{}) {
 	d.debateMutex.RLock()
 	defer d.debateMutex.RUnlock()
+	
+	clientCount := len(d.Clients)
+	log.Printf("Broadcasting to %d clients in debate %s", clientCount, d.DebateID)
+	
+	if clientCount == 0 {
+		log.Printf("No clients connected to receive broadcast in debate %s", d.DebateID)
+		return
+	}
+	
 	for client := range d.Clients {
-		// Use a separate goroutine for each write to avoid blocking
-		go func(c *websocket.Conn) {
-			if err := c.WriteJSON(message); err != nil {
-				log.Printf("Error broadcasting to client in debate %s: %v", d.DebateID, err)
-				// Optional: Consider removing the client if write fails repeatedly
-			}
-		}(client)
+		// Write synchronously to avoid concurrent writes to the same connection
+		// Each WebSocket connection can only have one writer at a time
+		if err := client.WriteJSON(message); err != nil {
+			log.Printf("Error broadcasting to client in debate %s: %v", d.DebateID, err)
+			// Optional: Consider removing the client if write fails repeatedly
+		} else {
+			log.Printf("Successfully broadcast message to client in debate %s", d.DebateID)
+		}
 	}
 }
 
