@@ -28,27 +28,27 @@ tidy:
 .PHONY: init-db
 init-db: dirs
 	@echo "Initializing database through migrations..."
-	@go run cmd/main.go --migrate-only
+	@go run cmd/migrate.go
 
 # Full setup
 .PHONY: setup
-setup: dirs init-db ssl tidy
+setup: dirs init-db tidy
 	@echo "Setup completed. You can now run the server."
 
 # Build and run commands
 .PHONY: run
-run: setup
+run: dirs tidy
 	@echo "Starting $(PROJECT_NAME) server..."
 	@go run cmd/main.go
 
 # One command to rule them all
 .PHONY: start
-start: kill-server setup
+start: kill-server dirs tidy
 	@echo "Starting fresh instance of $(PROJECT_NAME) server..."
 	@go run cmd/main.go
 
 .PHONY: build
-build: setup
+build: dirs tidy
 	@echo "Building $(PROJECT_NAME)..."
 	@go build -o bin/$(PROJECT_NAME) cmd/main.go
 
@@ -75,12 +75,19 @@ db-shell:
 reset-db:
 	@echo "Resetting database..."
 	@rm -f $(DB_PATH)
-	@go run cmd/main.go --init-db-only
+	@mkdir -p data
+	@go run cmd/migrate.go
+	@echo "Database reset complete. Use 'make run' to start the server."
+
+.PHONY: reset-and-start
+reset-and-start: kill-server reset-db
+	@echo "Starting server with fresh database..."
+	@go run cmd/main.go
 
 .PHONY: migrate
 migrate:
 	@echo "Running database migrations..."
-	@go run cmd/main.go --migrate-only
+	@go run cmd/migrate.go
 
 .PHONY: migrate-only
 migrate-only:
@@ -232,7 +239,8 @@ help:
 	@echo "\nDatabase commands:"
 	@echo "  make db-check        - Check database with SQL queries"
 	@echo "  make db-shell        - Open SQLite shell"
-	@echo "  make reset-db        - Reset database (remove and recreate)"
+	@echo "  make reset-db        - Reset database (remove and recreate) - DOES NOT START SERVER"
+	@echo "  make reset-and-start - Reset database and start server"
 	@echo "  make migrate         - Run database migrations"
 	@echo "  make create-test-debates - Create test debates for development"
 	@echo "\nTesting commands:"

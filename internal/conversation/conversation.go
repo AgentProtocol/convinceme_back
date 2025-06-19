@@ -30,7 +30,7 @@ type DebateConfig struct {
 func DefaultConfig() DebateConfig {
 	return DebateConfig{
 		Topic:               "Are memecoins net negative or positive for the crypto space?",
-		MaxTurns:            10, // Example, might not be used directly
+		MaxTurns:            20, // Increased from 10 to allow for longer debates
 		TurnDelay:           500 * time.Millisecond,
 		ResponseStyle:       types.ResponseStyleDebate,
 		MaxCompletionTokens: 150,
