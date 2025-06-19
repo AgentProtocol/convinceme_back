@@ -75,7 +75,7 @@ var upgrader = websocket.Upgrader{
 const (
 	TIGER_AGENT = "'Fundamentals First' Bradford"
 	BEAR_AGENT  = "'Memecoin Supercycle' Murad"
-	MAX_SCORE   = 200
+	MAX_SCORE   = 10
 )
 
 func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey string, useHTTPS bool, config *Config) *Server {
@@ -416,7 +416,52 @@ func (s *Server) handleDebateWebSocket(c *gin.Context) {
 	// 3. Add client to session
 	session.AddClient(ws, playerID)
 
-	// 4. If first client for a 'waiting' debate, start the debate loop
+	// 4. Send current debate state to new client (for reconnections)
+	status := session.GetStatus()
+	gameScore := session.GetGameScore()
+	recentHistory := session.GetRecentHistory(10) // Send last 10 messages for context
+
+	// Send welcome message with current state
+	welcomeMsg := gin.H{
+		"type":   "welcome",
+		"status": status,
+		"gameScore": gin.H{
+			session.Agent1.GetName(): float64(gameScore.Agent1Score),
+			session.Agent2.GetName(): float64(gameScore.Agent2Score),
+		},
+		"debate_id": debateID,
+		"player_id": playerID,
+	}
+
+	if err := ws.WriteJSON(welcomeMsg); err != nil {
+		logging.Error("Failed to send welcome message", map[string]interface{}{
+			"error":     err,
+			"debate_id": debateID,
+			"player_id": playerID,
+		})
+	}
+
+	// Send recent history to help client catch up
+	for _, entry := range recentHistory {
+		historyMsg := gin.H{
+			"type":      "message",
+			"agent":     entry.Speaker,
+			"content":   entry.Message,
+			"timestamp": entry.Time,
+			"isPlayer":  entry.IsPlayer,
+			"isHistory": true, // Mark as historical message
+		}
+		if err := ws.WriteJSON(historyMsg); err != nil {
+			logging.Error("Failed to send history message", map[string]interface{}{
+				"error":     err,
+				"debate_id": debateID,
+				"player_id": playerID,
+			})
+			break // Stop sending history if there's an error
+		}
+	}
+
+	// 5. If first client for a 'waiting' debate, start the debate loop
 	if session.GetStatus() == "waiting" {
 		logging.LogDebateEvent("status_change", debateID, map[string]interface{}{
 			"from_status":  "waiting",
@@ -444,35 +489,87 @@ func (s *Server) handleDebateWebSocket(c *gin.Context) {
 		logging.LogWebSocketEvent("client_disconnected", debateID, playerID, map[string]interface{}{
 			"remaining_clients": remainingClients,
 		})
-		// If last client leaves an active debate, consider stopping it
+
+		// IMPORTANT: Never stop debates due to client disconnections!
+		// Debates should continue running even without observers to allow:
+		// 1. Clients to reconnect and catch up on the debate
+		// 2. New clients to join ongoing debates
+		// 3. Robust handling of network issues
+
 		if remainingClients == 0 && session.GetStatus() == "active" {
-			log.Printf("Last client left debate %s. Stopping loop.", debateID)
-			// Signal the debate loop to stop (implementation needed in DebateSession/Manager)
-			// For now, just update status
-			session.UpdateStatus("finished") // Or maybe "waiting"?
-			err := s.db.UpdateDebateStatus(debateID, session.GetStatus())
-			if err != nil {
-				log.Printf("Error updating debate %s status to %s in DB on disconnect: %v", debateID, session.GetStatus(), err)
-			}
-			// Consider removing from manager's active map if truly finished
-			// s.debateManager.RemoveDebate(debateID)
+			logging.Info("Debate continues without observers", map[string]interface{}{
+				"debate_id": debateID,
+				"status":    "active_unobserved",
+			})
+			// Debates only stop when:
+			// 1. A winner is determined (HP reaches 0)
+			// 2. Timeout occurs (15 minutes)
+			// 3. Manual intervention
+			// 4. Critical errors in the debate loop
 		}
 	}()
 
-	// 5. Handle incoming messages for this client/session
+	// 6. Handle incoming messages for this client/session with better error recovery
 	for {
-		var msg ConversationMessage // Use the existing message struct for now
+		var msg ConversationMessage
+
+		// Set read deadline to detect connection issues
+		ws.SetReadDeadline(time.Now().Add(60 * time.Second))
+
 		err := ws.ReadJSON(&msg)
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("WebSocket error for player %s in debate %s: %v", playerID, debateID, err)
+				logging.Error("Unexpected WebSocket error", map[string]interface{}{
+					"error":     err,
+					"player_id": playerID,
+					"debate_id": debateID,
+				})
 			} else {
-				log.Printf("WebSocket closed for player %s in debate %s", playerID, debateID)
+				logging.Info("WebSocket connection closed", map[string]interface{}{
+					"player_id": playerID,
+					"debate_id": debateID,
+					"reason":    "normal_close",
+				})
 			}
 			break // Exit loop on error/close
 		}
 
-		log.Printf("Received message from player %s in debate %s: %s", playerID, debateID, msg.Message)
+		// Reset read deadline after successful read
+		ws.SetReadDeadline(time.Time{})
+
+		logging.Info("Received player message", map[string]interface{}{
+			"player_id": playerID,
+			"debate_id": debateID,
+			"message":   msg.Message,
+			"type":      msg.Type,
+		})
+
+		// Handle special message types for state synchronization
+		if msg.Type == "get_state" {
+			debateInfo, err := s.debateManager.GetDebateInfo(debateID)
+			if err != nil {
+				logging.Error("Failed to get debate info", map[string]interface{}{
+					"error":     err,
+					"debate_id": debateID,
+					"player_id": playerID,
+				})
+				continue
+			}
+
+			stateMsg := gin.H{
+				"type":        "state_update",
+				"debate_info": debateInfo,
+			}
+
+			if err := ws.WriteJSON(stateMsg); err != nil {
+				logging.Error("Failed to send state update", map[string]interface{}{
+					"error":     err,
+					"debate_id": debateID,
+					"player_id": playerID,
+				})
+			}
+			continue // Don't process as regular message
+		}
 
 		// Process the player message
 		if msg.Message == "" {
@@ -510,25 +607,68 @@ func (s *Server) handleDebateWebSocket(c *gin.Context) {
 			}
 		}
 
-		// 4. Update game score based on player message
-		// Determine which agent the player is supporting/opposing
-		var agent1Delta, agent2Delta int
-		// Use sum of all parameters like the agents do
-		scoreDelta := int(score.Strength + score.Relevance + score.Logic + score.Truth + score.Humor)
+		// 4. Update game score based on player message using comparative performance
+		// Calculate player's average score (same scale as agents: 1-10)
+		playerAverageScore := float64(score.Strength+score.Relevance+score.Logic+score.Truth+score.Humor) / 5.0
 
-		// If player explicitly chose a side, use that
+		// Determine which side the player is supporting first
+		var supportedAgent, opposedAgent string
+
 		if msg.Side == "agent1" || strings.Contains(strings.ToLower(msg.Message), strings.ToLower(session.Agent1.GetName())) {
-			// Player is supporting Agent1
-			agent1Delta = scoreDelta
-			agent2Delta = -scoreDelta
+			supportedAgent = session.Agent1.GetName()
+			opposedAgent = session.Agent2.GetName()
 		} else if msg.Side == "agent2" || strings.Contains(strings.ToLower(msg.Message), strings.ToLower(session.Agent2.GetName())) {
-			// Player is supporting Agent2
-			agent1Delta = -scoreDelta
-			agent2Delta = scoreDelta
+			supportedAgent = session.Agent2.GetName()
+			opposedAgent = session.Agent1.GetName()
 		} else {
-			// No clear side, use a smaller impact
-			agent1Delta = scoreDelta / 2
-			agent2Delta = -scoreDelta / 2
+			// No clear side - no HP changes for neutral comments
+			supportedAgent = ""
+			opposedAgent = ""
+		}
+
+		var agent1Delta, agent2Delta int
+
+		if supportedAgent != "" && opposedAgent != "" {
+			// Get recent scores for both agents to see which is performing worse
+			supportedAgentScore := session.GetRecentAgentScore(supportedAgent, 3)
+			opposedAgentScore := session.GetRecentAgentScore(opposedAgent, 3)
+
+			// Compare player's argument quality with agent performance
+			// If player's argument is much stronger than the opposed agent's recent performance,
+			// the opposed agent loses HP
+			scoreDifferenceVsOpposed := playerAverageScore - opposedAgentScore
+
+			var hpLoss int
+			if scoreDifferenceVsOpposed > 1.0 {
+				// Player's argument is significantly better than opposed agent - opposed agent loses HP
+				hpLoss = int(scoreDifferenceVsOpposed * 3) // 3x multiplier for good player intervention
+				if hpLoss > 15 {
+					hpLoss = 15 // Cap at 15 HP loss
+				}
+				if hpLoss < 3 {
+					hpLoss = 3 // Minimum meaningful loss
+				}
+
+				// Apply HP loss to the opposed agent
+				if opposedAgent == session.Agent1.GetName() {
+					agent1Delta = -hpLoss
+					agent2Delta = 0
+				} else {
+					agent1Delta = 0
+					agent2Delta = -hpLoss
+				}
+			} else {
+				// Player's argument is not significantly better - no HP changes
+				agent1Delta = 0
+				agent2Delta = 0
+			}
+
+			log.Printf("Player comparative scoring - Player: %.2f, Supported agent: %.2f, Opposed agent: %.2f, Score diff vs opposed: %.2f, HP loss: %d",
+				playerAverageScore, supportedAgentScore, opposedAgentScore, scoreDifferenceVsOpposed, hpLoss)
+		} else {
+			// Neutral comment - no HP changes
+			agent1Delta = 0
+			agent2Delta = 0
 		}
 
 		gameScore := session.UpdateGameScore(agent1Delta, agent2Delta)

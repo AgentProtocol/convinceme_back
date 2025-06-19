@@ -40,10 +40,11 @@ func DefaultConfig() DebateConfig {
 
 // DebateEntry represents a single message in the debate history
 type DebateEntry struct {
-	Speaker  string    `json:"speaker"` // Agent name or Player ID
-	Message  string    `json:"message"`
-	Time     time.Time `json:"time"`
-	IsPlayer bool      `json:"is_player"`
+	Speaker      string    `json:"speaker"` // Agent name or Player ID
+	Message      string    `json:"message"`
+	Time         time.Time `json:"time"`
+	IsPlayer     bool      `json:"is_player"`
+	AverageScore *float64  `json:"average_score,omitempty"` // Average score for this message (agents only)
 }
 
 // GameScore tracks the scores within a debate session
@@ -84,7 +85,7 @@ func NewDebateSession(id string, agent1, agent2 *agent.Agent, config DebateConfi
 	}
 
 	// Initialize GameScore (starting at 100 HP each)
-	initialScore := 100 // Start with 100 HP for both agents
+	initialScore := 10 // Start with 100 HP for both agents
 
 	return &DebateSession{
 		DebateID:    id,
@@ -169,13 +170,25 @@ func (d *DebateSession) AddHistoryEntry(speaker string, message string, isPlayer
 	d.debateMutex.Lock()
 	defer d.debateMutex.Unlock()
 	entry := DebateEntry{
-		Speaker:  speaker,
-		Message:  message,
-		Time:     time.Now(),
-		IsPlayer: isPlayer,
+		Speaker:      speaker,
+		Message:      message,
+		Time:         time.Now(),
+		IsPlayer:     isPlayer,
+		AverageScore: nil, // Will be populated later for agent messages
 	}
 	d.History = append(d.History, entry)
 	// Optional: Limit history size if needed
+}
+
+// UpdateLastHistoryEntryScore updates the score of the most recent history entry
+// Used to add scores to agent messages after they've been scored
+func (d *DebateSession) UpdateLastHistoryEntryScore(score float64) {
+	d.debateMutex.Lock()
+	defer d.debateMutex.Unlock()
+
+	if len(d.History) > 0 {
+		d.History[len(d.History)-1].AverageScore = &score
+	}
 }
 
 // GetRecentHistory retrieves the last N entries safely
@@ -225,6 +238,71 @@ func (d *DebateSession) GetGameScore() GameScore {
 	d.debateMutex.RLock()
 	defer d.debateMutex.RUnlock()
 	return d.GameScore
+}
+
+// GetRecentAgentAverageScore calculates the average score of recent agent messages
+// Used as baseline for dynamic player message scoring
+func (d *DebateSession) GetRecentAgentAverageScore(lookbackCount int) float64 {
+	d.debateMutex.RLock()
+	defer d.debateMutex.RUnlock()
+
+	if lookbackCount <= 0 {
+		lookbackCount = 3 // Default to last 3 agent messages
+	}
+
+	// Look through history in reverse to find recent agent messages
+	agentScores := make([]float64, 0, lookbackCount)
+	for i := len(d.History) - 1; i >= 0 && len(agentScores) < lookbackCount; i-- {
+		entry := d.History[i]
+		// Skip player messages, only consider agent messages with scores
+		if !entry.IsPlayer && entry.AverageScore != nil {
+			agentScores = append(agentScores, *entry.AverageScore)
+		}
+	}
+
+	if len(agentScores) == 0 {
+		return 5.5 // Default baseline - slightly above average if no agent messages found
+	}
+
+	// Calculate average
+	sum := 0.0
+	for _, score := range agentScores {
+		sum += score
+	}
+
+	return sum / float64(len(agentScores))
+}
+
+// GetRecentAgentScore gets the average score for a specific agent from recent messages
+func (d *DebateSession) GetRecentAgentScore(agentName string, lookbackCount int) float64 {
+	d.debateMutex.RLock()
+	defer d.debateMutex.RUnlock()
+
+	if lookbackCount <= 0 {
+		lookbackCount = 3 // Default to last 3 messages
+	}
+
+	// Look through history in reverse to find recent messages from this specific agent
+	agentScores := make([]float64, 0, lookbackCount)
+	for i := len(d.History) - 1; i >= 0 && len(agentScores) < lookbackCount; i-- {
+		entry := d.History[i]
+		// Only consider messages from the specified agent with scores
+		if !entry.IsPlayer && entry.Speaker == agentName && entry.AverageScore != nil {
+			agentScores = append(agentScores, *entry.AverageScore)
+		}
+	}
+
+	if len(agentScores) == 0 {
+		return 5.5 // Default baseline if no messages found for this agent
+	}
+
+	// Calculate average
+	sum := 0.0
+	for _, score := range agentScores {
+		sum += score
+	}
+
+	return sum / float64(len(agentScores))
 }
 
 // GetStopChannel returns the channel used to signal the debate loop to stop

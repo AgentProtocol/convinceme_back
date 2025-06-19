@@ -116,10 +116,28 @@ func (m *DebateManager) GetDebate(debateID string) (*conversation.DebateSession,
 func (m *DebateManager) StartDebateLoop(session *conversation.DebateSession) {
 	// Start the debate loop in a goroutine
 	go func() {
+		// Add panic recovery to prevent the debate loop from crashing silently
+		defer func() {
+			if r := recover(); r != nil {
+				logging.Error("Panic in debate loop", map[string]interface{}{
+					"debate_id": session.DebateID,
+					"panic":     r,
+				})
+				// Set debate status to finished if it panicked
+				session.UpdateStatus("finished")
+				session.Broadcast(gin.H{
+					"type":    "error",
+					"message": "Internal error occurred in debate. Debate has ended.",
+				})
+			}
+		}()
+
 		ctx := context.Background()
 		debateID := session.DebateID
 
-		log.Printf("Starting debate loop for debate %s", debateID)
+		logging.Info("Starting debate loop", map[string]interface{}{
+			"debate_id": debateID,
+		})
 
 		// Generate initial message
 		initialMessage := fmt.Sprintf("Welcome to the debate on: %s", session.Config.Topic)
@@ -131,14 +149,67 @@ func (m *DebateManager) StartDebateLoop(session *conversation.DebateSession) {
 		// Add a slight delay before first agent speaks
 		time.Sleep(2 * time.Second)
 
-		// Main debate loop
-		for turn := 0; turn < session.Config.MaxTurns; turn++ {
+		// Set debate timeout to 15 minutes
+		debateTimeout := time.NewTimer(15 * time.Minute)
+		defer debateTimeout.Stop()
+
+		// Add heartbeat to monitor debate progress
+		lastActivityTime := time.Now()
+		maxInactivityDuration := 5 * time.Minute // If no progress for 5 minutes, something is wrong
+
+		// Main debate loop - continue until winner or timeout
+		agentTurnCount := 0 // Add counter to track agent turns
+
+		for {
+			// Check for timeout
+			select {
+			case <-debateTimeout.C:
+				logging.Info("Debate timed out", map[string]interface{}{
+					"debate_id":        debateID,
+					"timeout_duration": "15m",
+				})
+				session.UpdateStatus("finished")
+				session.Broadcast(gin.H{
+					"type":    "timeout",
+					"message": "Debate timed out after 15 minutes. No winner determined.",
+				})
+				return
+			default:
+				// Continue with debate logic
+			}
+
+			// Check for inactivity (debate stuck)
+			if time.Since(lastActivityTime) > maxInactivityDuration {
+				logging.Error("Debate appears stuck - no progress for too long", map[string]interface{}{
+					"debate_id":           debateID,
+					"last_activity":       lastActivityTime,
+					"inactivity_duration": time.Since(lastActivityTime),
+					"max_allowed":         maxInactivityDuration,
+				})
+				session.UpdateStatus("finished")
+				session.Broadcast(gin.H{
+					"type":    "error",
+					"message": "Debate ended due to inactivity. No progress detected for 5 minutes.",
+				})
+				return
+			}
+
 			// Check if debate should continue
 			status := session.GetStatus()
 			if status != "active" {
-				log.Printf("Debate %s is no longer active (status: %s). Ending loop.", debateID, status)
+				logging.Info("Debate no longer active, ending loop", map[string]interface{}{
+					"debate_id": debateID,
+					"status":    status,
+				})
 				break
 			}
+
+			// Increment agent turn counter
+			agentTurnCount++
+			logging.Info("Starting agent turn", map[string]interface{}{
+				"debate_id": debateID,
+				"turn":      agentTurnCount,
+			})
 
 			// Add a small delay to allow for player interruptions
 			time.Sleep(1 * time.Second)
@@ -146,6 +217,11 @@ func (m *DebateManager) StartDebateLoop(session *conversation.DebateSession) {
 			// Get next agent to speak
 			agent := session.GetNextAgent()
 			agentName := agent.GetName()
+			logging.Info("Agent will speak", map[string]interface{}{
+				"debate_id":  debateID,
+				"agent_name": agentName,
+				"turn":       agentTurnCount,
+			})
 
 			// Get context from recent history
 			recentHistory := session.GetRecentHistory(5)
@@ -153,33 +229,87 @@ func (m *DebateManager) StartDebateLoop(session *conversation.DebateSession) {
 			for _, entry := range recentHistory {
 				contextStr += fmt.Sprintf("%s: %s\n", entry.Speaker, entry.Message)
 			}
+			logging.Debug("Context for agent", map[string]interface{}{
+				"debate_id": debateID,
+				"turn":      agentTurnCount,
+				"context":   contextStr,
+			})
 
 			// Generate response
 			prompt := getPrompt(contextStr, "", agentName, "Debate Participant", session.Config.Topic)
+			logging.Info("Calling agent.GenerateResponse", map[string]interface{}{
+				"debate_id":  debateID,
+				"agent_name": agentName,
+				"turn":       agentTurnCount,
+			})
 			response, err := agent.GenerateResponse(ctx, session.Config.Topic, prompt)
 			if err != nil {
-				log.Printf("Error generating response for %s in debate %s: %v", agentName, debateID, err)
+				logging.Error("Error generating response", map[string]interface{}{
+					"debate_id":  debateID,
+					"agent_name": agentName,
+					"turn":       agentTurnCount,
+					"error":      err.Error(),
+				})
 				continue
 			}
+			logging.Info("Successfully generated response", map[string]interface{}{
+				"debate_id":  debateID,
+				"agent_name": agentName,
+				"turn":       agentTurnCount,
+				"response":   response,
+			})
 
-			// Add to history
+			// Update activity time - we made progress!
+			lastActivityTime = time.Now()
+
+			// Add to history - scoring will be done later
 			session.AddHistoryEntry(agentName, response, false)
+			logging.Info("Added response to history", map[string]interface{}{
+				"debate_id":  debateID,
+				"agent_name": agentName,
+				"turn":       agentTurnCount,
+			})
 
 			// Generate audio for the response
+			logging.Info("Generating audio", map[string]interface{}{
+				"debate_id":  debateID,
+				"agent_name": agentName,
+				"turn":       agentTurnCount,
+			})
 			audioData, err := agent.GenerateAndStreamAudio(ctx, response)
 			var audioURL string
 			if err != nil {
-				log.Printf("Error generating audio for %s in debate %s: %v", agentName, debateID, err)
+				logging.Error("Error generating audio", map[string]interface{}{
+					"debate_id":  debateID,
+					"agent_name": agentName,
+					"turn":       agentTurnCount,
+					"error":      err.Error(),
+				})
 			} else {
 				// Store audio in cache and get URL
 				audioURL = m.server.CacheAudio(audioData)
-				log.Printf("Generated audio for %s in debate %s: %s", agentName, debateID, audioURL)
+				logging.Info("Generated audio", map[string]interface{}{
+					"debate_id":  debateID,
+					"agent_name": agentName,
+					"turn":       agentTurnCount,
+					"audio_url":  audioURL,
+				})
 			}
 
 			// Score the argument
+			logging.Info("Scoring argument", map[string]interface{}{
+				"debate_id":  debateID,
+				"agent_name": agentName,
+				"turn":       agentTurnCount,
+			})
 			score, err := m.scorer.ScoreArgument(ctx, response, session.Config.Topic)
 			if err != nil {
-				log.Printf("Error scoring response for %s in debate %s: %v", agentName, debateID, err)
+				logging.Error("Error scoring response", map[string]interface{}{
+					"debate_id":  debateID,
+					"agent_name": agentName,
+					"turn":       agentTurnCount,
+					"error":      err.Error(),
+				})
 				// Create a default score rather than skipping scoring entirely
 				score = &scoring.ArgumentScore{
 					Strength:    5,
@@ -190,28 +320,105 @@ func (m *DebateManager) StartDebateLoop(session *conversation.DebateSession) {
 					Average:     5.0,
 					Explanation: "Failed to calculate score",
 				}
+			} else {
+				logging.Info("Successfully scored argument", map[string]interface{}{
+					"debate_id":  debateID,
+					"agent_name": agentName,
+					"turn":       agentTurnCount,
+					"score":      score.Average,
+				})
 			}
 
-			// Update game score based on agent and score
-			// Use simple +1/-1 scoring based on argument strength
-			var agent1Delta, agent2Delta int
+			// Update the history entry with the score
+			session.UpdateLastHistoryEntryScore(score.Average)
 
-			// Strong arguments (score > 7.0) give +1, weak arguments (score < 4.0) give -1
-			// Calculate delta based on sum of all score parameters
-			// Sum all parameters (Strength + Relevance + Logic + Truth + Humor)
-			totalScore := score.Strength + score.Relevance + score.Logic + score.Truth + score.Humor
-			scoreDelta := int(totalScore) // This will be the HP change
+			// Update game score based on comparative performance
+			// Compare current agent's score with opponent's recent average score
+			currentAgentScore := score.Average
 
-			// Better agent gets positive points, weaker side gets negative
+			// Get opponent's name and recent score
+			var opponentName string
 			if agentName == session.Agent1.GetName() {
-				agent1Delta = scoreDelta
-				agent2Delta = -scoreDelta
+				opponentName = session.Agent2.GetName()
 			} else {
-				agent1Delta = -scoreDelta
-				agent2Delta = scoreDelta
+				opponentName = session.Agent1.GetName()
+			}
+
+			opponentRecentScore := session.GetRecentAgentScore(opponentName, 3) // Get opponent's recent performance
+
+			// Calculate performance difference
+			scoreDifference := currentAgentScore - opponentRecentScore
+
+			// Determine HP changes based on who performed worse
+			var hpLoss int
+			var weakerSide string
+
+			if scoreDifference > 0.5 {
+				// Current agent performed significantly better - opponent loses HP
+				hpLoss = int(scoreDifference * 4) // Scale the difference
+				if hpLoss > 20 {
+					hpLoss = 20 // Cap maximum loss
+				}
+				if hpLoss < 3 {
+					hpLoss = 3 // Minimum meaningful loss
+				}
+
+				if agentName == session.Agent1.GetName() {
+					weakerSide = session.Agent2.GetName()
+				} else {
+					weakerSide = session.Agent1.GetName()
+				}
+			} else if scoreDifference < -0.5 {
+				// Current agent performed significantly worse - current agent loses HP
+				hpLoss = int(-scoreDifference * 4) // Scale the difference
+				if hpLoss > 20 {
+					hpLoss = 20 // Cap maximum loss
+				}
+				if hpLoss < 3 {
+					hpLoss = 3 // Minimum meaningful loss
+				}
+				weakerSide = agentName
+			} else {
+				// Performance is roughly equal - no HP loss
+				hpLoss = 0
+				weakerSide = ""
+			}
+
+			logging.Info("Calculated HP loss based on comparative performance", map[string]interface{}{
+				"debate_id":             debateID,
+				"current_agent":         agentName,
+				"current_score":         currentAgentScore,
+				"opponent_recent_score": opponentRecentScore,
+				"score_difference":      scoreDifference,
+				"hp_loss":               hpLoss,
+				"weaker_side":           weakerSide,
+			})
+
+			// Apply HP loss to the weaker performing side
+			var agent1Delta, agent2Delta int
+			if hpLoss > 0 && weakerSide != "" {
+				if weakerSide == session.Agent1.GetName() {
+					agent1Delta = -hpLoss // Agent1 loses HP for weaker argument
+					agent2Delta = 0       // Agent2 unchanged
+				} else {
+					agent1Delta = 0       // Agent1 unchanged
+					agent2Delta = -hpLoss // Agent2 loses HP for weaker argument
+				}
+			} else {
+				// No HP changes for equal performance
+				agent1Delta = 0
+				agent2Delta = 0
 			}
 
 			gameScore := session.UpdateGameScore(agent1Delta, agent2Delta)
+			logging.Info("Updated game score", map[string]interface{}{
+				"debate_id":    debateID,
+				"turn":         agentTurnCount,
+				"agent1_score": gameScore.Agent1Score,
+				"agent2_score": gameScore.Agent2Score,
+				"agent1_delta": agent1Delta,
+				"agent2_delta": agent2Delta,
+			})
 
 			// Check for game over condition
 			var gameOver bool
@@ -220,9 +427,23 @@ func (m *DebateManager) StartDebateLoop(session *conversation.DebateSession) {
 			if gameScore.Agent1Score <= 0 {
 				gameOver = true
 				winner = session.Agent2.GetName()
+				logging.Info("Game over - Agent1 health depleted", map[string]interface{}{
+					"debate_id":    debateID,
+					"winner":       winner,
+					"agent1_score": gameScore.Agent1Score,
+					"agent2_score": gameScore.Agent2Score,
+					"turn":         agentTurnCount,
+				})
 			} else if gameScore.Agent2Score <= 0 {
 				gameOver = true
 				winner = session.Agent1.GetName()
+				logging.Info("Game over - Agent2 health depleted", map[string]interface{}{
+					"debate_id":    debateID,
+					"winner":       winner,
+					"agent1_score": gameScore.Agent1Score,
+					"agent2_score": gameScore.Agent2Score,
+					"turn":         agentTurnCount,
+				})
 			}
 
 			// Broadcast response with score
@@ -291,12 +512,12 @@ func (m *DebateManager) StartDebateLoop(session *conversation.DebateSession) {
 			time.Sleep(session.Config.TurnDelay)
 		}
 
-		// If we reached max turns without a winner
-		if session.GetStatus() == "active" {
-			log.Printf("Debate %s reached maximum turns without a winner", debateID)
-			session.UpdateStatus("finished")
-			m.db.UpdateDebateEnd(debateID, "finished", "")
-		}
+		// Debate ended due to status change (winner determined, timeout, or error)
+		logging.Info("Debate loop ended", map[string]interface{}{
+			"debate_id":    debateID,
+			"final_status": session.GetStatus(),
+			"total_turns":  agentTurnCount,
+		})
 	}()
 }
 
@@ -410,4 +631,53 @@ func (m *DebateManager) LoadActiveDebates() error {
 
 	log.Printf("Successfully loaded %d debates into memory", len(m.debates))
 	return nil
+}
+
+// GetDebateInfo returns comprehensive information about a debate for reconnecting clients
+func (m *DebateManager) GetDebateInfo(debateID string) (map[string]interface{}, error) {
+	m.debatesMutex.RLock()
+	defer m.debatesMutex.RUnlock()
+
+	session, exists := m.debates[debateID]
+	if !exists {
+		return nil, fmt.Errorf("debate not found")
+	}
+
+	// Get current game scores
+	gameScore := session.GetGameScore()
+
+	// Get recent history for catch-up
+	recentHistory := session.GetRecentHistory(10)
+
+	// Convert history to a format suitable for frontend
+	historyData := make([]map[string]interface{}, 0, len(recentHistory))
+	for _, entry := range recentHistory {
+		historyData = append(historyData, map[string]interface{}{
+			"speaker":   entry.Speaker,
+			"message":   entry.Message,
+			"time":      entry.Time,
+			"is_player": entry.IsPlayer,
+		})
+	}
+
+	debateInfo := map[string]interface{}{
+		"debate_id": debateID,
+		"status":    session.GetStatus(),
+		"topic":     session.Config.Topic,
+		"agent1":    session.Agent1.GetName(),
+		"agent2":    session.Agent2.GetName(),
+		"game_score": map[string]interface{}{
+			session.Agent1.GetName(): m.NormalizeScore(gameScore.Agent1Score),
+			session.Agent2.GetName(): m.NormalizeScore(gameScore.Agent2Score),
+		},
+		"internal_score": map[string]interface{}{
+			session.Agent1.GetName(): gameScore.Agent1Score,
+			session.Agent2.GetName(): gameScore.Agent2Score,
+		},
+		"history":      historyData,
+		"client_count": len(session.Clients),
+		"is_active":    session.GetStatus() == "active",
+	}
+
+	return debateInfo, nil
 }
