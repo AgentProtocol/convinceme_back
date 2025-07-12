@@ -120,7 +120,7 @@ func main() {
 	// inputHandler := player.NewInputHandler(logger)
 
 	// Define the debate topic with explicit initial context
-	commonTopic := "Are memecoins net negative or positive for the crypto space?"
+	commonTopic := "Who's the GOAT of football: Messi or Ronaldo?"
 
 	// Create debate configuration using the renamed struct and DefaultConfig
 	logging.Info("Setting up debate configuration", map[string]interface{}{
