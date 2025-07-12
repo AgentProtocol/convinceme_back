@@ -173,9 +173,19 @@ func main() {
 		"invitation_required":         requireInvitation,
 	})
 
+	// Get port from environment, default to 8080
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8081"
+	}
+	// Ensure port has colon prefix
+	if port[0] != ':' {
+		port = ":" + port
+	}
+
 	// Update server config to include both API keys
 	serverConfig := &server.Config{
-		Port:                     ":8080",
+		Port:                     port,
 		OpenAIKey:                openAIKey,
 		ElevenLabsKey:            elevenLabsKey, // Use ElevenLabs key
 		ResponseDelay:            500,

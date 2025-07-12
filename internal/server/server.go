@@ -75,7 +75,7 @@ var upgrader = websocket.Upgrader{
 const (
 	TIGER_AGENT = "'Fundamentals First' Bradford"
 	BEAR_AGENT  = "'Memecoin Supercycle' Murad"
-	MAX_SCORE   = 10
+	MAX_SCORE   = 200
 )
 
 func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey string, useHTTPS bool, config *Config) *Server {
@@ -167,6 +167,9 @@ func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey str
 	server.debateManager = debateManager
 
 	// --- Update Routes ---
+	// Health check endpoint for container health monitoring
+	router.GET("/health", server.healthCheck)
+	
 	// router.GET("/ws/conversation", server.handleConversationWebSocket) // Old route
 	router.GET("/ws/debate/:debateID", server.handleDebateWebSocket) // New route
 	router.GET("/api/audio/:id", server.handleAudioStream)           // Remains mostly the same
@@ -215,6 +218,14 @@ func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey str
 
 	log.Printf("Server initialized with %d agents", len(agents))
 	return server
+}
+
+// Health check endpoint for container monitoring
+func (s *Server) healthCheck(c *gin.Context) {
+	c.JSON(200, gin.H{
+		"status": "healthy",
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	})
 }
 
 // --- New API Handlers (Stubs) ---
