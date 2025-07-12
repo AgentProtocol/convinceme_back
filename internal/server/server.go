@@ -73,8 +73,8 @@ var upgrader = websocket.Upgrader{
 
 // Define constants for agent roles
 const (
-	TIGER_AGENT = "'Fundamentals First' Bradford"
-	BEAR_AGENT  = "'Memecoin Supercycle' Murad"
+	TIGER_AGENT = "'La Pulga Protector' Pepito"
+	BEAR_AGENT  = "'Siuuuu Sensei' Sergio"
 	MAX_SCORE   = 10
 )
 

@@ -29,7 +29,7 @@ type DebateConfig struct {
 // DefaultConfig returns a default configuration for a debate
 func DefaultConfig() DebateConfig {
 	return DebateConfig{
-		Topic:               "Are memecoins net negative or positive for the crypto space?",
+		Topic:               "Who's the GOAT of football: Messi or Ronaldo?",
 		MaxTurns:            20, // Increased from 10 to allow for longer debates
 		TurnDelay:           500 * time.Millisecond,
 		ResponseStyle:       types.ResponseStyleDebate,
