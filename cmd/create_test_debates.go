@@ -36,14 +36,14 @@ func main() {
 	}
 
 	// Load agent configurations from JSON files
-	agent1Config, err := agent.LoadAgentConfig("internal/agent/degenerate.json")
+	agent1Config, err := agent.LoadAgentConfig("internal/agent/messi.json")
 	if err != nil {
-		log.Fatalf("Failed to load degenerate config: %v", err)
+		log.Fatalf("Failed to load messi config: %v", err)
 	}
 
-	agent2Config, err := agent.LoadAgentConfig("internal/agent/midcurver.json")
+	agent2Config, err := agent.LoadAgentConfig("internal/agent/ronaldo.json")
 	if err != nil {
-		log.Fatalf("Failed to load midcurver config: %v", err)
+		log.Fatalf("Failed to load ronaldo config: %v", err)
 	}
 
 	// Create agents with OpenAI API key
@@ -68,11 +68,12 @@ func main() {
 
 	// Create test debates with different topics
 	topics := []string{
-		"Are memecoins net negative or positive for the crypto space?",
-		"Is Bitcoin digital gold or a payment system?",
-		"Will Ethereum remain the dominant smart contract platform?",
-		"Are NFTs a lasting innovation or a passing fad?",
-		"Should crypto be regulated by governments?",
+		"Who's the GOAT of football: Messi or Ronaldo?",
+		"PSG: Is this CL win the start of a new era or just a one-time success?",
+		"VAR: Saving the game or ruining the flow?",
+		"Premier League or La Liga: Which is the best league in the world?",
+		"Who's the better manager: Guardiola or Klopp?",
+		"Is the Champions League more prestigious than the World Cup?"
 	}
 
 	// Create debates

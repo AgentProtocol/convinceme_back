@@ -29,7 +29,7 @@ type DebateConfig struct {
 // DefaultConfig returns a default configuration for a debate
 func DefaultConfig() DebateConfig {
 	return DebateConfig{
-		Topic:               "Are memecoins net negative or positive for the crypto space?",
+		Topic:               "Who's the GOAT of football: Messi or Ronaldo?",
 		MaxTurns:            20, // Increased from 10 to allow for longer debates
 		TurnDelay:           500 * time.Millisecond,
 		ResponseStyle:       types.ResponseStyleDebate,
@@ -62,6 +62,7 @@ type DebateSession struct {
 	Config      DebateConfig               `json:"config"`
 	Status      string                     `json:"status"` // e.g., "waiting", "active", "finished"
 	Clients     map[*websocket.Conn]string `json:"-"`      // Map of client connections to Player IDs for this debate
+	UserNames   map[string]string          `json:"-"`      // Map of Player IDs to display names (e.g., Twitter usernames)
 	History     []DebateEntry              `json:"history"`
 	GameScore   GameScore                  `json:"game_score"`
 	Judge       *tools.ConvictionJudge     `json:"-"` // Optional: Judge for analysis
@@ -94,6 +95,7 @@ func NewDebateSession(id string, agent1, agent2 *agent.Agent, config DebateConfi
 		Config:      config,
 		Status:      "waiting", // Initial status
 		Clients:     make(map[*websocket.Conn]string),
+		UserNames:   make(map[string]string),
 		History:     make([]DebateEntry, 0),
 		GameScore:   GameScore{Agent1Score: initialScore, Agent2Score: initialScore},
 		Judge:       judge,
@@ -112,6 +114,24 @@ func (d *DebateSession) AddClient(conn *websocket.Conn, playerID string) {
 	defer d.debateMutex.Unlock()
 	d.Clients[conn] = playerID
 	log.Printf("Player %s joined debate %s. Total clients: %d", playerID, d.DebateID, len(d.Clients))
+}
+
+// SetUserName sets the display name for a player ID
+func (d *DebateSession) SetUserName(playerID string, displayName string) {
+	d.debateMutex.Lock()
+	defer d.debateMutex.Unlock()
+	d.UserNames[playerID] = displayName
+	log.Printf("Set username for player %s to %s in debate %s", playerID, displayName, d.DebateID)
+}
+
+// GetUserName gets the display name for a player ID, returns the playerID if no display name is set
+func (d *DebateSession) GetUserName(playerID string) string {
+	d.debateMutex.RLock()
+	defer d.debateMutex.RUnlock()
+	if displayName, exists := d.UserNames[playerID]; exists {
+		return displayName
+	}
+	return playerID // Return original playerID if no display name is set
 }
 
 // RemoveClient removes a WebSocket client from the session

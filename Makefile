@@ -163,7 +163,7 @@ api-start-debate:
 	@echo "\nStarting new debate session:"
 	@curl -s -X POST http://localhost:$(PORT)/api/conversation/start \
 		-H "Content-Type: application/json" \
-		-d '{"topic": "Are memecoins net negative or positive for the crypto space?"}' | jq '.'
+		-d '{"topic": "Who's the GOAT of football: Messi or Ronaldo?"}' | jq '.'
 
 # Topic API endpoints
 .PHONY: api-topics

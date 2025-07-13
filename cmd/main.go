@@ -89,14 +89,14 @@ func main() {
 
 	// Load agent configurations from JSON files
 	logging.Info("Loading agent configurations...")
-	agent1Config, err := agent.LoadAgentConfig("internal/agent/degenerate.json")
+	agent1Config, err := agent.LoadAgentConfig("internal/agent/messi.json")
 	if err != nil {
-		logging.Fatal("Failed to load degenerate config", map[string]interface{}{"error": err})
+		logging.Fatal("Failed to load messi config", map[string]interface{}{"error": err})
 	}
 
-	agent2Config, err := agent.LoadAgentConfig("internal/agent/midcurver.json")
+	agent2Config, err := agent.LoadAgentConfig("internal/agent/ronaldo.json")
 	if err != nil {
-		logging.Fatal("Failed to load midcurver config", map[string]interface{}{"error": err})
+		logging.Fatal("Failed to load ronaldo config", map[string]interface{}{"error": err})
 	}
 	logging.Info("Agent configurations loaded", map[string]interface{}{
 		"agent1": agent1Config.Name,
@@ -120,7 +120,7 @@ func main() {
 	// inputHandler := player.NewInputHandler(logger)
 
 	// Define the debate topic with explicit initial context
-	commonTopic := "Are memecoins net negative or positive for the crypto space?"
+	commonTopic := "Who's the GOAT of football: Messi or Ronaldo?"
 
 	// Create debate configuration using the renamed struct and DefaultConfig
 	logging.Info("Setting up debate configuration", map[string]interface{}{

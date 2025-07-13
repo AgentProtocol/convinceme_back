@@ -53,6 +53,7 @@ type DebateEntry struct {
 
 type ConversationMessage struct {
 	PlayerID string `json:"player_id"`
+	Username string `json:"username"` // Add username field for social usernames
 	Topic    string `json:"topic"`
 	Message  string `json:"message"`
 	Type     string `json:"type"`
@@ -73,9 +74,15 @@ var upgrader = websocket.Upgrader{
 
 // Define constants for agent roles
 const (
+<<<<<<< HEAD
 	TIGER_AGENT = "'Fundamentals First' Bradford"
 	BEAR_AGENT  = "'Memecoin Supercycle' Murad"
 	MAX_SCORE   = 200
+=======
+	TIGER_AGENT = "'La Pulga Protector' Pepito"
+	BEAR_AGENT  = "'Siuuuu Sensei' Sergio"
+	MAX_SCORE   = 10
+>>>>>>> origin/soccer_prompts
 )
 
 func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey string, useHTTPS bool, config *Config) *Server {
@@ -552,6 +559,7 @@ func (s *Server) handleDebateWebSocket(c *gin.Context) {
 			"player_id": playerID,
 			"debate_id": debateID,
 			"message":   msg.Message,
+			"username":  msg.Username,
 			"type":      msg.Type,
 		})
 
@@ -582,13 +590,32 @@ func (s *Server) handleDebateWebSocket(c *gin.Context) {
 			continue // Don't process as regular message
 		}
 
+		// Handle username setting - this allows the client to set their display name
+		if msg.Type == "set_username" && msg.Username != "" {
+			session.SetUserName(playerID, msg.Username)
+			logging.Info("Set username for player", map[string]interface{}{
+				"player_id": playerID,
+				"username":  msg.Username,
+				"debate_id": debateID,
+			})
+			continue // Don't process as regular message
+		}
+
 		// Process the player message
 		if msg.Message == "" {
 			continue // Skip empty messages
 		}
 
+		// Set username if provided with the message
+		if msg.Username != "" {
+			session.SetUserName(playerID, msg.Username)
+		}
+
+		// Get the display name for this player
+		displayName := session.GetUserName(playerID)
+
 		// 1. Handle player interruption
-		session.HandlePlayerInterruption(playerID, msg.Message)
+		session.HandlePlayerInterruption(displayName, msg.Message)
 
 		// 2. Score the argument
 		score, err := s.scorer.ScoreArgument(context.Background(), msg.Message, session.Config.Topic)
@@ -606,8 +633,8 @@ func (s *Server) handleDebateWebSocket(c *gin.Context) {
 			}
 		}
 
-		// 3. Save argument to database with debate ID
-		argumentID, err := s.db.SaveArgument(playerID, session.Config.Topic, msg.Message, msg.Side, debateID)
+		// 3. Save argument to database with debate ID - use displayName for storage
+		argumentID, err := s.db.SaveArgument(displayName, session.Config.Topic, msg.Message, msg.Side, debateID)
 		if err != nil {
 			log.Printf("Error saving player argument to database: %v", err)
 		} else {
@@ -687,7 +714,7 @@ func (s *Server) handleDebateWebSocket(c *gin.Context) {
 		// 5. Broadcast the player message with score
 		session.Broadcast(gin.H{
 			"type":     "message",
-			"agent":    playerID, // Show full player ID
+			"agent":    displayName, // Show full player ID
 			"content":  msg.Message,
 			"isPlayer": true,
 			"scores": gin.H{
