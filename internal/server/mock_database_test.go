@@ -479,6 +479,36 @@ func (m *TestMockDB) GetLeaderboard(debateID string, limit int) ([]*database.Arg
 	}, nil
 }
 
+// SubmitVote mocks submitting a vote for an argument
+func (m *TestMockDB) SubmitVote(userID string, argumentID int64, debateID string, voteType string) error {
+	return nil // Successful vote submission
+}
+
+// GetUserVoteCount mocks getting the number of votes a user has cast in a debate
+func (m *TestMockDB) GetUserVoteCount(userID string, debateID string) (int, error) {
+	return 1, nil // User has cast 1 vote
+}
+
+// HasUserPaidForComment mocks checking if user has paid for a comment in a debate
+func (m *TestMockDB) HasUserPaidForComment(userID string, debateID string) (bool, error) {
+	return true, nil // User has paid for a comment
+}
+
+// GetUserVoteForArgument mocks getting user's vote for a specific argument
+func (m *TestMockDB) GetUserVoteForArgument(userID string, argumentID int64) (string, error) {
+	return "", nil // No existing vote
+}
+
+// CanUserVote mocks checking if user can vote on an argument
+func (m *TestMockDB) CanUserVote(userID string, argumentID int64, debateID string) (bool, string, error) {
+	return true, "You have 2 votes remaining", nil // User can vote
+}
+
+// RunMigrations mocks running database migrations
+func (m *TestMockDB) RunMigrations() error {
+	return nil // Successful migration
+}
+
 // SaveFeedback saves feedback to the database
 func (m *TestMockDB) SaveFeedback(feedback *database.Feedback) error {
 	feedback.ID = 1

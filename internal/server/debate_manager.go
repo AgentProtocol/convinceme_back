@@ -332,92 +332,39 @@ func (m *DebateManager) StartDebateLoop(session *conversation.DebateSession) {
 			// Update the history entry with the score
 			session.UpdateLastHistoryEntryScore(score.Average)
 
-			// Update game score based on comparative performance
-			// Compare current agent's score with opponent's recent average score
+			// Update game score based on direct scoring
+			// Each agent's score adds to their side and subtracts from opponent
 			currentAgentScore := score.Average
+			scorePoints := int(currentAgentScore) // Convert 0-10 score to integer points
 
-			// Get opponent's name and recent score
-			var opponentName string
-			if agentName == session.Agent1.GetName() {
-				opponentName = session.Agent2.GetName()
-			} else {
-				opponentName = session.Agent1.GetName()
-			}
-
-			opponentRecentScore := session.GetRecentAgentScore(opponentName, 3) // Get opponent's recent performance
-
-			// Calculate performance difference
-			scoreDifference := currentAgentScore - opponentRecentScore
-
-			// Determine HP changes based on who performed worse
-			var hpLoss int
-			var weakerSide string
-
-			if scoreDifference > 0.5 {
-				// Current agent performed significantly better - opponent loses HP
-				hpLoss = int(scoreDifference * 4) // Scale the difference
-				if hpLoss > 20 {
-					hpLoss = 20 // Cap maximum loss
-				}
-				if hpLoss < 3 {
-					hpLoss = 3 // Minimum meaningful loss
-				}
-
-				if agentName == session.Agent1.GetName() {
-					weakerSide = session.Agent2.GetName()
-				} else {
-					weakerSide = session.Agent1.GetName()
-				}
-			} else if scoreDifference < -0.5 {
-				// Current agent performed significantly worse - current agent loses HP
-				hpLoss = int(-scoreDifference * 4) // Scale the difference
-				if hpLoss > 20 {
-					hpLoss = 20 // Cap maximum loss
-				}
-				if hpLoss < 3 {
-					hpLoss = 3 // Minimum meaningful loss
-				}
-				weakerSide = agentName
-			} else {
-				// Performance is roughly equal - no HP loss
-				hpLoss = 0
-				weakerSide = ""
-			}
-
-			logging.Info("Calculated HP loss based on comparative performance", map[string]interface{}{
-				"debate_id":             debateID,
-				"current_agent":         agentName,
-				"current_score":         currentAgentScore,
-				"opponent_recent_score": opponentRecentScore,
-				"score_difference":      scoreDifference,
-				"hp_loss":               hpLoss,
-				"weaker_side":           weakerSide,
+			logging.Info("Applying direct scoring based on agent performance", map[string]interface{}{
+				"debate_id":     debateID,
+				"current_agent": agentName,
+				"score":         currentAgentScore,
+				"score_points":  scorePoints,
 			})
 
-			// Apply HP loss to the weaker performing side
+			// Apply score: agent gets +points, opponent gets -points
 			var agent1Delta, agent2Delta int
-			if hpLoss > 0 && weakerSide != "" {
-				if weakerSide == session.Agent1.GetName() {
-					agent1Delta = -hpLoss // Agent1 loses HP for weaker argument
-					agent2Delta = 0       // Agent2 unchanged
-				} else {
-					agent1Delta = 0       // Agent1 unchanged
-					agent2Delta = -hpLoss // Agent2 loses HP for weaker argument
-				}
+			if agentName == session.Agent1.GetName() {
+				agent1Delta = scorePoints  // Agent1 gets positive points
+				agent2Delta = -scorePoints // Agent2 loses same amount of points
 			} else {
-				// No HP changes for equal performance
-				agent1Delta = 0
-				agent2Delta = 0
+				agent1Delta = -scorePoints // Agent1 loses points
+				agent2Delta = scorePoints  // Agent2 gets positive points
 			}
 
 			gameScore := session.UpdateGameScore(agent1Delta, agent2Delta)
-			logging.Info("Updated game score", map[string]interface{}{
-				"debate_id":    debateID,
-				"turn":         agentTurnCount,
-				"agent1_score": gameScore.Agent1Score,
-				"agent2_score": gameScore.Agent2Score,
-				"agent1_delta": agent1Delta,
-				"agent2_delta": agent2Delta,
+			logging.Info("Updated game score with direct scoring", map[string]interface{}{
+				"debate_id":     debateID,
+				"turn":          agentTurnCount,
+				"current_agent": agentName,
+				"agent_score":   currentAgentScore,
+				"score_points":  int(currentAgentScore),
+				"agent1_score":  gameScore.Agent1Score,
+				"agent2_score":  gameScore.Agent2Score,
+				"agent1_delta":  agent1Delta,
+				"agent2_delta":  agent2Delta,
 			})
 
 			// Check for game over condition

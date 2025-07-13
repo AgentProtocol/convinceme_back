@@ -180,6 +180,12 @@ func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey str
 	router.GET("/api/debates", server.listDebatesHandler)                          // New endpoint to list debates
 	router.GET("/api/debates/:debateID", server.getDebateHandler)                  // New endpoint to get specific debate details
 	router.GET("/api/debates/:debateID/leaderboard", server.getLeaderboardHandler) // New endpoint to get debate leaderboard
+
+	// Protected voting endpoint - requires authentication
+	voteGroup := router.Group("/api/arguments")
+	voteGroup.Use(server.auth.AuthMiddleware())
+	voteGroup.POST("/:argumentID/vote", server.submitVoteHandler) // New endpoint to submit votes on arguments
+
 	// router.GET("/api/gameScore", server.getGameScore) // Game score is now per-debate
 
 	// Topic-related endpoints
@@ -400,6 +406,81 @@ func (s *Server) getLeaderboardHandler(c *gin.Context) {
 		"leaderboard": arguments,
 		"limit":       limit,
 		"total":       len(arguments),
+	})
+}
+
+// submitVoteHandler handles voting on arguments
+func (s *Server) submitVoteHandler(c *gin.Context) {
+	// Get argument ID from URL parameter
+	argumentIDStr := c.Param("argumentID")
+	argumentID, err := strconv.ParseInt(argumentIDStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid argument ID"})
+		return
+	}
+
+	// Parse request body
+	var req struct {
+		VoteType string `json:"vote_type" binding:"required"` // "upvote" or "downvote"
+		DebateID string `json:"debate_id" binding:"required"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body", "details": err.Error()})
+		return
+	}
+
+	// Validate vote type
+	if req.VoteType != "upvote" && req.VoteType != "downvote" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid vote type. Must be 'upvote' or 'downvote'"})
+		return
+	}
+
+	// Get user ID from authentication context
+	userID, exists := auth.GetUserID(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+		return
+	}
+
+	// Check if user can vote
+	canVote, reason, err := s.db.CanUserVote(userID, argumentID, req.DebateID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check voting eligibility", "details": err.Error()})
+		return
+	}
+
+	if !canVote {
+		c.JSON(http.StatusForbidden, gin.H{"error": reason})
+		return
+	}
+
+	// Submit the vote
+	err = s.db.SubmitVote(userID, argumentID, req.DebateID, req.VoteType)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to submit vote", "details": err.Error()})
+		return
+	}
+
+	// Get updated leaderboard and broadcast it
+	leaderboard, err := s.db.GetLeaderboard(req.DebateID, 10)
+	if err != nil {
+		log.Printf("Error getting leaderboard for broadcast after vote: %v", err)
+	} else {
+		// Find the debate session and broadcast the update
+		if session, exists := s.debateManager.GetDebate(req.DebateID); exists {
+			session.Broadcast(gin.H{
+				"type":        "leaderboard_update",
+				"debate_id":   req.DebateID,
+				"leaderboard": leaderboard,
+			})
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "Vote submitted successfully",
+		"reason":  reason,
 	})
 }
 
@@ -666,10 +747,11 @@ func (s *Server) handleDebateWebSocket(c *gin.Context) {
 		// Determine which side the player is supporting first
 		var supportedAgent, opposedAgent string
 
-		if msg.Side == "agent1" || strings.Contains(strings.ToLower(msg.Message), strings.ToLower(session.Agent1.GetName())) {
+		// Check if side matches agent names directly (frontend sends agent names)
+		if msg.Side == "agent1" || msg.Side == session.Agent1.GetName() || strings.Contains(strings.ToLower(msg.Message), strings.ToLower(session.Agent1.GetName())) {
 			supportedAgent = session.Agent1.GetName()
 			opposedAgent = session.Agent2.GetName()
-		} else if msg.Side == "agent2" || strings.Contains(strings.ToLower(msg.Message), strings.ToLower(session.Agent2.GetName())) {
+		} else if msg.Side == "agent2" || msg.Side == session.Agent2.GetName() || strings.Contains(strings.ToLower(msg.Message), strings.ToLower(session.Agent2.GetName())) {
 			supportedAgent = session.Agent2.GetName()
 			opposedAgent = session.Agent1.GetName()
 		} else {
@@ -678,45 +760,26 @@ func (s *Server) handleDebateWebSocket(c *gin.Context) {
 			opposedAgent = ""
 		}
 
+		log.Printf("Player side assignment - msg.Side: '%s', Agent1: '%s', Agent2: '%s', Supported: '%s', Opposed: '%s'",
+			msg.Side, session.Agent1.GetName(), session.Agent2.GetName(), supportedAgent, opposedAgent)
+
 		var agent1Delta, agent2Delta int
 
 		if supportedAgent != "" && opposedAgent != "" {
-			// Get recent scores for both agents to see which is performing worse
-			supportedAgentScore := session.GetRecentAgentScore(supportedAgent, 3)
-			opposedAgentScore := session.GetRecentAgentScore(opposedAgent, 3)
+			// Direct scoring: player's score points go to supported agent, deducted from opposed agent
+			scorePoints := int(playerAverageScore) // Convert 0-10 score to integer points
 
-			// Compare player's argument quality with agent performance
-			// If player's argument is much stronger than the opposed agent's recent performance,
-			// the opposed agent loses HP
-			scoreDifferenceVsOpposed := playerAverageScore - opposedAgentScore
-
-			var hpLoss int
-			if scoreDifferenceVsOpposed > 1.0 {
-				// Player's argument is significantly better than opposed agent - opposed agent loses HP
-				hpLoss = int(scoreDifferenceVsOpposed * 3) // 3x multiplier for good player intervention
-				if hpLoss > 15 {
-					hpLoss = 15 // Cap at 15 HP loss
-				}
-				if hpLoss < 3 {
-					hpLoss = 3 // Minimum meaningful loss
-				}
-
-				// Apply HP loss to the opposed agent
-				if opposedAgent == session.Agent1.GetName() {
-					agent1Delta = -hpLoss
-					agent2Delta = 0
-				} else {
-					agent1Delta = 0
-					agent2Delta = -hpLoss
-				}
+			// Apply score: supported agent gets +points, opposed agent gets -points
+			if supportedAgent == session.Agent1.GetName() {
+				agent1Delta = scorePoints  // Agent1 (supported) gets positive points
+				agent2Delta = -scorePoints // Agent2 (opposed) loses same amount of points
 			} else {
-				// Player's argument is not significantly better - no HP changes
-				agent1Delta = 0
-				agent2Delta = 0
+				agent1Delta = -scorePoints // Agent1 (opposed) loses points
+				agent2Delta = scorePoints  // Agent2 (supported) gets positive points
 			}
 
-			log.Printf("Player comparative scoring - Player: %.2f, Supported agent: %.2f, Opposed agent: %.2f, Score diff vs opposed: %.2f, HP loss: %d",
-				playerAverageScore, supportedAgentScore, opposedAgentScore, scoreDifferenceVsOpposed, hpLoss)
+			log.Printf("Player direct scoring - Player: %.2f, Score points: %d, Supported agent: %s (+%d), Opposed agent: %s (-%d)",
+				playerAverageScore, scorePoints, supportedAgent, scorePoints, opposedAgent, scorePoints)
 		} else {
 			// Neutral comment - no HP changes
 			agent1Delta = 0

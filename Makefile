@@ -1,6 +1,6 @@
 # Project variables
 PROJECT_NAME := convinceme_backend
-PORT := 8080
+PORT := 8081
 DB_PATH := data/arguments.db
 QUERY_PATH := sql/queries.sql
 

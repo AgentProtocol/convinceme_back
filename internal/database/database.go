@@ -53,6 +53,10 @@ type Argument struct {
 	DebateID  *string                `json:"debate_id,omitempty"` // Use pointer for nullable string
 	CreatedAt string                 `json:"created_at"`
 	Score     *scoring.ArgumentScore `json:"score,omitempty"`
+	Upvotes   int                    `json:"upvotes"`
+	Downvotes int                    `json:"downvotes"`
+	VoteScore float64                `json:"vote_score"`
+	UserVote  string                 `json:"user_vote,omitempty"` // Current user's vote on this argument
 }
 
 // New creates a new database connection and initializes the schema
@@ -269,7 +273,8 @@ func (d *Database) GetAllArguments() ([]*Argument, error) {
 func (d *Database) GetLeaderboard(debateID string, limit int) ([]*Argument, error) {
 	query := `
 		SELECT a.id, a.player_id, a.topic, a.content, a.side, a.debate_id, a.created_at,
-			   s.strength, s.relevance, s.logic, s.truth, s.humor, s.average, s.explanation
+			   s.strength, s.relevance, s.logic, s.truth, s.humor, s.average, s.explanation,
+			   COALESCE(a.upvotes, 0), COALESCE(a.downvotes, 0), COALESCE(a.vote_score, 0.0)
 		FROM arguments a
 		INNER JOIN scores s ON a.id = s.argument_id
 		WHERE a.debate_id = ?
@@ -284,27 +289,192 @@ func (d *Database) GetLeaderboard(debateID string, limit int) ([]*Argument, erro
 
 	var arguments []*Argument
 	for rows.Next() {
-		var arg Argument
-		var score scoring.ArgumentScore
-		var debateIDResult sql.NullString
+		arg := &Argument{}
+		score := &scoring.ArgumentScore{}
+		var debateIDStr sql.NullString
 
 		err := rows.Scan(
-			&arg.ID, &arg.PlayerID, &arg.Topic, &arg.Content, &arg.Side, &debateIDResult, &arg.CreatedAt,
+			&arg.ID, &arg.PlayerID, &arg.Topic, &arg.Content, &arg.Side, &debateIDStr, &arg.CreatedAt,
 			&score.Strength, &score.Relevance, &score.Logic, &score.Truth, &score.Humor,
 			&score.Average, &score.Explanation,
+			&arg.Upvotes, &arg.Downvotes, &arg.VoteScore,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("failed to scan leaderboard argument row: %v", err)
+			return nil, fmt.Errorf("failed to scan leaderboard row: %v", err)
 		}
 
-		if debateIDResult.Valid {
-			arg.DebateID = &debateIDResult.String
+		if debateIDStr.Valid {
+			arg.DebateID = &debateIDStr.String
 		}
-		arg.Score = &score
-		arguments = append(arguments, &arg)
+
+		arg.Score = score
+		arguments = append(arguments, arg)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating leaderboard rows: %v", err)
 	}
 
 	return arguments, nil
+}
+
+// SubmitVote submits a vote for an argument and updates the argument's score
+func (d *Database) SubmitVote(userID string, argumentID int64, debateID string, voteType string) error {
+	// Validate vote type
+	if voteType != "upvote" && voteType != "downvote" {
+		return fmt.Errorf("invalid vote type: %s", voteType)
+	}
+
+	// Start a transaction to ensure consistency
+	tx, err := d.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to start transaction: %v", err)
+	}
+	defer tx.Rollback()
+
+	// Insert the vote
+	insertVoteQuery := `
+		INSERT INTO votes (user_id, argument_id, debate_id, vote_type)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(user_id, argument_id) DO UPDATE SET
+			vote_type = excluded.vote_type,
+			created_at = CURRENT_TIMESTAMP`
+
+	_, err = tx.Exec(insertVoteQuery, userID, argumentID, debateID, voteType)
+	if err != nil {
+		return fmt.Errorf("failed to insert vote: %v", err)
+	}
+
+	// Update argument vote counts
+	updateCountsQuery := `
+		UPDATE arguments SET
+			upvotes = (SELECT COUNT(*) FROM votes WHERE argument_id = ? AND vote_type = 'upvote'),
+			downvotes = (SELECT COUNT(*) FROM votes WHERE argument_id = ? AND vote_type = 'downvote'),
+			vote_score = CASE 
+				WHEN (SELECT COUNT(*) FROM votes WHERE argument_id = ? AND vote_type = 'upvote') > 
+					 (SELECT COUNT(*) FROM votes WHERE argument_id = ? AND vote_type = 'downvote') 
+				THEN ((SELECT COUNT(*) FROM votes WHERE argument_id = ? AND vote_type = 'upvote') - 
+					  (SELECT COUNT(*) FROM votes WHERE argument_id = ? AND vote_type = 'downvote')) * 0.2
+				ELSE -((SELECT COUNT(*) FROM votes WHERE argument_id = ? AND vote_type = 'downvote') - 
+					   (SELECT COUNT(*) FROM votes WHERE argument_id = ? AND vote_type = 'upvote')) * 0.2
+			END
+		WHERE id = ?`
+
+	_, err = tx.Exec(updateCountsQuery, argumentID, argumentID, argumentID, argumentID, argumentID, argumentID, argumentID, argumentID, argumentID)
+	if err != nil {
+		return fmt.Errorf("failed to update argument vote counts: %v", err)
+	}
+
+	// Update the score in the scores table as well
+	updateScoreQuery := `
+		UPDATE scores SET
+			average = (
+				SELECT 
+					(s.strength + s.relevance + s.logic + s.truth + s.humor) / 5.0 + COALESCE(a.vote_score, 0)
+				FROM scores s
+				JOIN arguments a ON s.argument_id = a.id
+				WHERE s.argument_id = ?
+			)
+		WHERE argument_id = ?`
+
+	_, err = tx.Exec(updateScoreQuery, argumentID, argumentID)
+	if err != nil {
+		return fmt.Errorf("failed to update score average: %v", err)
+	}
+
+	// Commit the transaction
+	err = tx.Commit()
+	if err != nil {
+		return fmt.Errorf("failed to commit transaction: %v", err)
+	}
+
+	return nil
+}
+
+// GetUserVoteCount gets the number of votes a user has cast in a specific debate
+func (d *Database) GetUserVoteCount(userID string, debateID string) (int, error) {
+	query := `SELECT COALESCE(vote_count, 0) FROM user_vote_counts WHERE user_id = ? AND debate_id = ?`
+
+	var count int
+	err := d.db.QueryRow(query, userID, debateID).Scan(&count)
+	if err != nil && err != sql.ErrNoRows {
+		return 0, fmt.Errorf("failed to get user vote count: %v", err)
+	}
+
+	return count, nil
+}
+
+// HasUserPaidForComment checks if a user has submitted a paid argument in a specific debate
+func (d *Database) HasUserPaidForComment(userID string, debateID string) (bool, error) {
+	// For now, we'll check if the user has submitted any argument in this debate
+	// This can be enhanced later to check for actual payment verification
+	query := `SELECT COUNT(*) FROM arguments WHERE player_id = ? AND debate_id = ?`
+
+	var count int
+	err := d.db.QueryRow(query, userID, debateID).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("failed to check user participation: %v", err)
+	}
+
+	return count > 0, nil
+}
+
+// GetUserVoteForArgument gets the user's vote for a specific argument
+func (d *Database) GetUserVoteForArgument(userID string, argumentID int64) (string, error) {
+	query := `SELECT vote_type FROM votes WHERE user_id = ? AND argument_id = ?`
+
+	var voteType string
+	err := d.db.QueryRow(query, userID, argumentID).Scan(&voteType)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", nil // No vote found
+		}
+		return "", fmt.Errorf("failed to get user vote: %v", err)
+	}
+
+	return voteType, nil
+}
+
+// CanUserVote checks if a user can vote on an argument
+func (d *Database) CanUserVote(userID string, argumentID int64, debateID string) (bool, string, error) {
+	// Check if user has paid for a comment in this debate
+	hasPaid, err := d.HasUserPaidForComment(userID, debateID)
+	if err != nil {
+		return false, "", err
+	}
+	if !hasPaid {
+		return false, "You must submit a paid comment to vote", nil
+	}
+
+	// Check if user has reached vote limit (3 votes per debate)
+	voteCount, err := d.GetUserVoteCount(userID, debateID)
+	if err != nil {
+		return false, "", err
+	}
+
+	// Check if user already voted on this argument
+	existingVote, err := d.GetUserVoteForArgument(userID, argumentID)
+	if err != nil {
+		return false, "", err
+	}
+
+	// If user already voted on this argument, they can change their vote
+	if existingVote != "" {
+		return true, "You can change your vote", nil
+	}
+
+	// If user hasn't reached vote limit, they can vote
+	if voteCount < 3 {
+		return true, fmt.Sprintf("You have %d votes remaining", 3-voteCount), nil
+	}
+
+	return false, "You have reached the maximum of 3 votes per debate", nil
+}
+
+// RunMigrations runs database migrations
+func (d *Database) RunMigrations() error {
+	migrationManager := NewMigrationManager(d.db)
+	return migrationManager.MigrateUp("migrations")
 }
 
 // --- Debate Management Functions ---

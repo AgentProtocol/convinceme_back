@@ -86,7 +86,7 @@ func NewDebateSession(id string, agent1, agent2 *agent.Agent, config DebateConfi
 	}
 
 	// Initialize GameScore (starting at 100 HP each)
-	initialScore := 10 // Start with 100 HP for both agents
+	initialScore := 100 // Start with 100 HP for both agents
 
 	return &DebateSession{
 		DebateID:    id,
