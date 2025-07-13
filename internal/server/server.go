@@ -175,10 +175,11 @@ func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey str
 	router.POST("/api/debates", server.createDebateHandler) // New endpoint to create debates
 	router.POST("/api/stt", audio.HandleSTT)
 	router.GET("/api/agents", server.listAgents)
-	router.GET("/api/arguments", server.getArguments)             // May need debateID filter later
-	router.GET("/api/arguments/:id", server.getArgument)          // May need debateID context later
-	router.GET("/api/debates", server.listDebatesHandler)         // New endpoint to list debates
-	router.GET("/api/debates/:debateID", server.getDebateHandler) // New endpoint to get specific debate details
+	router.GET("/api/arguments", server.getArguments)                              // May need debateID filter later
+	router.GET("/api/arguments/:id", server.getArgument)                           // May need debateID context later
+	router.GET("/api/debates", server.listDebatesHandler)                          // New endpoint to list debates
+	router.GET("/api/debates/:debateID", server.getDebateHandler)                  // New endpoint to get specific debate details
+	router.GET("/api/debates/:debateID/leaderboard", server.getLeaderboardHandler) // New endpoint to get debate leaderboard
 	// router.GET("/api/gameScore", server.getGameScore) // Game score is now per-debate
 
 	// Topic-related endpoints
@@ -370,6 +371,36 @@ func (s *Server) getDebateHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, response)
+}
+
+// getLeaderboardHandler returns the top-scoring arguments for a specific debate
+func (s *Server) getLeaderboardHandler(c *gin.Context) {
+	debateID := c.Param("debateID")
+	if debateID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Debate ID is required"})
+		return
+	}
+
+	// Get limit parameter, default to 10
+	limitStr := c.DefaultQuery("limit", "10")
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit <= 0 || limit > 100 {
+		limit = 10 // Default to 10, max 100
+	}
+
+	// Get leaderboard from database
+	arguments, err := s.db.GetLeaderboard(debateID, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get leaderboard", "details": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"debate_id":   debateID,
+		"leaderboard": arguments,
+		"limit":       limit,
+		"total":       len(arguments),
+	})
 }
 
 // --- WebSocket Handler ---
@@ -718,7 +749,19 @@ func (s *Server) handleDebateWebSocket(c *gin.Context) {
 			},
 		})
 
-		// 7. Check for game over condition
+		// 7. Broadcast updated leaderboard
+		leaderboard, err := s.db.GetLeaderboard(debateID, 10)
+		if err != nil {
+			log.Printf("Error getting leaderboard for broadcast in debate %s: %v", debateID, err)
+		} else {
+			session.Broadcast(gin.H{
+				"type":        "leaderboard_update",
+				"debate_id":   debateID,
+				"leaderboard": leaderboard,
+			})
+		}
+
+		// 8. Check for game over condition
 		if gameScore.Agent1Score <= 0 {
 			winner := session.Agent2.GetName()
 			handleGameOver(s, session, debateID, winner)

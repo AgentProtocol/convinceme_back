@@ -65,6 +65,7 @@ type DatabaseInterface interface {
 	SaveScore(argumentID int64, debateID string, score *scoring.ArgumentScore) error
 	GetAllArguments() ([]*Argument, error)
 	GetArgumentWithScore(id int64) (*Argument, error)
+	GetLeaderboard(debateID string, limit int) ([]*Argument, error)
 }
 
 // Ensure Database implements DatabaseInterface

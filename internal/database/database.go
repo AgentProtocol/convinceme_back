@@ -265,6 +265,48 @@ func (d *Database) GetAllArguments() ([]*Argument, error) {
 	return arguments, nil
 }
 
+// GetLeaderboard retrieves the top-scoring arguments for a specific debate
+func (d *Database) GetLeaderboard(debateID string, limit int) ([]*Argument, error) {
+	query := `
+		SELECT a.id, a.player_id, a.topic, a.content, a.side, a.debate_id, a.created_at,
+			   s.strength, s.relevance, s.logic, s.truth, s.humor, s.average, s.explanation
+		FROM arguments a
+		INNER JOIN scores s ON a.id = s.argument_id
+		WHERE a.debate_id = ?
+		ORDER BY s.average DESC, a.created_at ASC
+		LIMIT ?`
+
+	rows, err := d.db.Query(query, debateID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query leaderboard for debate %s: %v", debateID, err)
+	}
+	defer rows.Close()
+
+	var arguments []*Argument
+	for rows.Next() {
+		var arg Argument
+		var score scoring.ArgumentScore
+		var debateIDResult sql.NullString
+
+		err := rows.Scan(
+			&arg.ID, &arg.PlayerID, &arg.Topic, &arg.Content, &arg.Side, &debateIDResult, &arg.CreatedAt,
+			&score.Strength, &score.Relevance, &score.Logic, &score.Truth, &score.Humor,
+			&score.Average, &score.Explanation,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan leaderboard argument row: %v", err)
+		}
+
+		if debateIDResult.Valid {
+			arg.DebateID = &debateIDResult.String
+		}
+		arg.Score = &score
+		arguments = append(arguments, &arg)
+	}
+
+	return arguments, nil
+}
+
 // --- Debate Management Functions ---
 
 // CreateDebate adds a new debate session to the database

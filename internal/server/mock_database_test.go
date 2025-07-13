@@ -453,6 +453,32 @@ func (m *TestMockDB) GetArgumentWithScore(id int64) (*database.Argument, error) 
 	}, nil
 }
 
+// GetLeaderboard gets the top-scoring arguments for a specific debate
+func (m *TestMockDB) GetLeaderboard(debateID string, limit int) ([]*database.Argument, error) {
+	return []*database.Argument{
+		{
+			ID:        1,
+			PlayerID:  "player-1",
+			Topic:     "Test Topic",
+			Content:   "Best argument ever!",
+			Side:      "pro",
+			DebateID:  &debateID,
+			CreatedAt: "2023-01-01T12:00:00Z",
+			Score:     &scoring.ArgumentScore{Average: 9.5, Strength: 10, Relevance: 9, Logic: 10, Truth: 9, Humor: 9},
+		},
+		{
+			ID:        2,
+			PlayerID:  "player-2",
+			Topic:     "Test Topic",
+			Content:   "Great argument with solid logic",
+			Side:      "con",
+			DebateID:  &debateID,
+			CreatedAt: "2023-01-01T12:05:00Z",
+			Score:     &scoring.ArgumentScore{Average: 8.2, Strength: 8, Relevance: 8, Logic: 9, Truth: 8, Humor: 8},
+		},
+	}, nil
+}
+
 // SaveFeedback saves feedback to the database
 func (m *TestMockDB) SaveFeedback(feedback *database.Feedback) error {
 	feedback.ID = 1
