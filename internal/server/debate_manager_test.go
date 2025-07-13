@@ -216,6 +216,41 @@ func (m *MockDatabaseForDebate) DeleteFeedback(id int) error {
 	return nil
 }
 
+func (m *MockDatabaseForDebate) GetLeaderboard(debateID string, limit int) ([]*database.Argument, error) {
+	args := m.Called(debateID, limit)
+	return args.Get(0).([]*database.Argument), args.Error(1)
+}
+
+func (m *MockDatabaseForDebate) SubmitVote(userID string, argumentID int64, debateID string, voteType string) error {
+	args := m.Called(userID, argumentID, debateID, voteType)
+	return args.Error(0)
+}
+
+func (m *MockDatabaseForDebate) GetUserVoteCount(userID string, debateID string) (int, error) {
+	args := m.Called(userID, debateID)
+	return args.Int(0), args.Error(1)
+}
+
+func (m *MockDatabaseForDebate) HasUserPaidForComment(userID string, username string, debateID string) (bool, error) {
+	args := m.Called(userID, username, debateID)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockDatabaseForDebate) GetUserVoteForArgument(userID string, argumentID int64) (string, error) {
+	args := m.Called(userID, argumentID)
+	return args.String(0), args.Error(1)
+}
+
+func (m *MockDatabaseForDebate) CanUserVote(userID string, username string, argumentID int64, debateID string) (bool, string, error) {
+	args := m.Called(userID, username, argumentID, debateID)
+	return args.Bool(0), args.String(1), args.Error(2)
+}
+
+func (m *MockDatabaseForDebate) RunMigrations() error {
+	args := m.Called()
+	return args.Error(0)
+}
+
 // MockAgent for testing
 type MockAgent struct {
 	mock.Mock

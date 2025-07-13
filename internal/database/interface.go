@@ -70,9 +70,9 @@ type DatabaseInterface interface {
 	// Voting system
 	SubmitVote(userID string, argumentID int64, debateID string, voteType string) error
 	GetUserVoteCount(userID string, debateID string) (int, error)
-	HasUserPaidForComment(userID string, debateID string) (bool, error)
-	GetUserVoteForArgument(userID string, argumentID int64) (string, error)             // Returns vote type or empty string
-	CanUserVote(userID string, argumentID int64, debateID string) (bool, string, error) // Returns canVote, reason, error
+	HasUserPaidForComment(userID string, username string, debateID string) (bool, error)
+	GetUserVoteForArgument(userID string, argumentID int64) (string, error)                              // Returns vote type or empty string
+	CanUserVote(userID string, username string, argumentID int64, debateID string) (bool, string, error) // Returns canVote, reason, error
 
 	// Migration runner
 	RunMigrations() error

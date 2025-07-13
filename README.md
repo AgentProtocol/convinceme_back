@@ -68,6 +68,7 @@ make api-create-debate topic_id=1  # Create debate from topic
 ## API Routes
 
 ### Authentication
+
 - `POST /api/auth/register` - Register a new user
 - `POST /api/auth/login` - Login
 - `GET /api/auth/me` - Get current user (requires authentication)
@@ -76,26 +77,32 @@ make api-create-debate topic_id=1  # Create debate from topic
 - `DELETE /api/auth/me` - Delete current user (requires authentication)
 
 ### WebSocket
+
 - `GET /ws/debate/:id` - Real-time debate connection
 
 ### Arguments
+
 - `GET /api/arguments` - Get last 100 arguments with scores
 - `GET /api/arguments/:id` - Get specific argument by ID
 
 ### Topics
+
 - `GET /api/topics` - List all topics (with pagination and filtering)
 - `GET /api/topics/category/:category` - List topics by category
 - `GET /api/topics/:id` - Get specific topic details
 
 ### Debates
+
 - `GET /api/debates` - List all debates (with pagination and filtering)
 - `GET /api/debates/:id` - Get specific debate details
 - `POST /api/debates` - Create a new debate from a topic
 
 ### Agents
+
 - `GET /api/agents` - List available debate experts
 
 ### Audio
+
 - `GET /api/audio/:id` - Stream generated audio response
 - `POST /api/stt` - Speech-to-text conversion
 
@@ -183,6 +190,7 @@ make test-coverage
 ## Development Workflow
 
 1. **Setup Environment**:
+
    ```bash
    # Clone the repository
    git clone https://github.com/AgentProtocol/convinceme_back.git
@@ -197,6 +205,7 @@ make test-coverage
    ```
 
 2. **Database Setup**:
+
    ```bash
    # Run migrations to set up the database
    make migrate
@@ -206,11 +215,13 @@ make test-coverage
    ```
 
 3. **Run the Server**:
+
    ```bash
    make run
    ```
 
 4. **Testing**:
+
    ```bash
    # Run all tests
    make test
@@ -220,6 +231,7 @@ make test-coverage
    ```
 
 5. **API Testing**:
+
    ```bash
    # List all topics
    make api-topics
@@ -237,5 +249,5 @@ OPENAI_API_KEY=your_key_here
 # Optional
 USE_HTTPS=false  # Enable for HTTPS
 JWT_SECRET=your_secret_key  # Secret for JWT authentication
-PORT=8080        # Server port (default: 8080)
+PORT=8081        # Server port (default: 8080)
 ```

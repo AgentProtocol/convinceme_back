@@ -9,6 +9,8 @@ type Config struct {
 	JWTSecret                string // Secret key for JWT authentication
 	RequireEmailVerification bool   // Whether to require email verification
 	RequireInvitation        bool   // Whether to require invitation codes for registration
+	PrivyAppID               string // Privy App ID for validating external tokens
+	PrivyVerificationKey     string // Privy verification key for ES256 tokens (optional)
 }
 
 type AgentConfig struct {

@@ -93,6 +93,8 @@ func NewServer(agents map[string]*agent.Agent, db *database.Database, apiKey str
 		RefreshTokenDuration:     7 * 24 * time.Hour, // Refresh tokens valid for 7 days
 		RequireEmailVerification: config.RequireEmailVerification,
 		RequireInvitation:        config.RequireInvitation,
+		PrivyAppID:               config.PrivyAppID,
+		PrivyVerificationKey:     config.PrivyVerificationKey,
 	})
 
 	// Create a new router without default middleware
@@ -443,8 +445,15 @@ func (s *Server) submitVoteHandler(c *gin.Context) {
 		return
 	}
 
+	// Get username from authentication context
+	username, exists := auth.GetUsername(c)
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Username not found in authentication context"})
+		return
+	}
+
 	// Check if user can vote
-	canVote, reason, err := s.db.CanUserVote(userID, argumentID, req.DebateID)
+	canVote, reason, err := s.db.CanUserVote(userID, username, argumentID, req.DebateID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check voting eligibility", "details": err.Error()})
 		return

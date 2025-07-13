@@ -490,7 +490,7 @@ func (m *TestMockDB) GetUserVoteCount(userID string, debateID string) (int, erro
 }
 
 // HasUserPaidForComment mocks checking if user has paid for a comment in a debate
-func (m *TestMockDB) HasUserPaidForComment(userID string, debateID string) (bool, error) {
+func (m *TestMockDB) HasUserPaidForComment(userID string, username string, debateID string) (bool, error) {
 	return true, nil // User has paid for a comment
 }
 
@@ -500,7 +500,7 @@ func (m *TestMockDB) GetUserVoteForArgument(userID string, argumentID int64) (st
 }
 
 // CanUserVote mocks checking if user can vote on an argument
-func (m *TestMockDB) CanUserVote(userID string, argumentID int64, debateID string) (bool, string, error) {
+func (m *TestMockDB) CanUserVote(userID string, username string, argumentID int64, debateID string) (bool, string, error) {
 	return true, "You have 2 votes remaining", nil // User can vote
 }
 

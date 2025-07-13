@@ -162,6 +162,15 @@ func main() {
 		logging.Warn("JWT_SECRET not set, using default value for development")
 	}
 
+	// Get Privy App ID from environment variables
+	privyAppID := os.Getenv("PRIVY_APP_ID")
+	if privyAppID == "" {
+		logging.Warn("PRIVY_APP_ID not set, Privy token validation will be disabled")
+	}
+
+	// Optional: Get Privy verification key from environment variables
+	privyVerificationKey := os.Getenv("PRIVY_VERIFICATION_KEY")
+
 	// Check if email verification is required
 	requireEmailVerification := os.Getenv("REQUIRE_EMAIL_VERIFICATION") == "true"
 
@@ -171,6 +180,7 @@ func main() {
 	logging.Info("Authentication Configuration", map[string]interface{}{
 		"email_verification_required": requireEmailVerification,
 		"invitation_required":         requireInvitation,
+		"privy_enabled":               privyAppID != "",
 	})
 
 	// Update server config to include both API keys
@@ -182,6 +192,8 @@ func main() {
 		JWTSecret:                jwtSecret,
 		RequireEmailVerification: requireEmailVerification,
 		RequireInvitation:        requireInvitation,
+		PrivyAppID:               privyAppID,
+		PrivyVerificationKey:     privyVerificationKey,
 	}
 
 	// Create and start the server
